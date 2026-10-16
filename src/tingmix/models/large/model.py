@@ -20,10 +20,24 @@ class LargeModel:
 
     @classmethod
     def from_pretrained(cls, path_or_repo: str = DEFAULT_REPO, device: str | None = None, encoder_delta=None, **kw) -> LargeModel:
-        """`encoder_delta`: (cfg, state) of a fine-tuned encoder (mode lora/partial, see models.large.encoder.load_delta)."""
+        """Embed2ASR release directory or Hugging Face repo. A TingMix-Large release (tools/export_release.py) adds
+        `tingmix.json` + `encoder_delta.safetensors`, applied automatically; `encoder_delta` = (cfg, state) overrides it."""
+        import json
+        from pathlib import Path
+
         from embed2asr import Embed2ASR
 
-        asr = Embed2ASR.from_pretrained(path_or_repo, device=device, **kw)
+        path = Path(path_or_repo)
+        if not path.exists():
+            from huggingface_hub import snapshot_download
+
+            path = Path(snapshot_download(str(path_or_repo), revision=kw.pop("revision", None)))
+        asr = Embed2ASR.from_pretrained(path, device=device, **kw)
+        if encoder_delta is None and (path / "tingmix.json").is_file():
+            from safetensors.torch import load_file
+
+            meta = json.loads((path / "tingmix.json").read_text(encoding="utf-8"))
+            encoder_delta = (meta["encoder_delta"], load_file(str(path / meta["encoder_delta_file"])))
         if encoder_delta is not None:
             from .encoder import load_delta
 
