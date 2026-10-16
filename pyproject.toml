@@ -21,7 +21,7 @@ large = [
     "transformers==5.19.0",
     "embed2asr @ git+https://github.com/tc3oliver/embed2asr.git@v0.1.0",
 ]
-server = ["websockets>=12"]
+server = ["websockets>=13"]  # asyncio API (websockets.asyncio)
 mic = ["sounddevice"]
 train = ["pyyaml"]
 dev = ["pytest", "ruff", "build"]
@@ -48,3 +48,6 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
 ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tingmix", "training", "evaluation"]
