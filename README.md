@@ -2,8 +2,14 @@
 
 Real-time speech recognition for **Taiwanese Mandarin, English and intra-sentence Mandarin-English code-switching**.
 
-Status: early development. Nothing here is a released model yet; numbers are published only after a single,
-pre-registered test run (see [Evaluation](#evaluation)).
+Status: early development. No TingMix-Large weights are released yet; test numbers are published only after a single,
+pre-registered test run (see [Evaluation](#evaluation)). What works today:
+
+- `tingmix transcribe | listen | serve` with Embed2ASR-v1 or a TingMix-Large training export, optional character
+  n-gram LM decoding (`--lm`), WebSocket streaming with bearer-token auth;
+- encoder LoRA fine-tuning of the EmbeddingGemma 2 audio tower jointly with the CTC reader, with a restartable,
+  session-independent job manager ([docs/training.md](docs/training.md));
+- end-to-end accuracy and streaming evaluation scripts (`evaluation/`).
 
 ## Models
 
