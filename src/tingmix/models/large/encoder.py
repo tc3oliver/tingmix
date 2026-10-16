@@ -158,4 +158,8 @@ def load_delta(tower, cfg: dict, state: dict[str, torch.Tensor]) -> None:
         with torch.no_grad():
             for n, t in state.items():
                 own[n].copy_(t.to(own[n].dtype))
+    if mode == "partial":  # inference runs the whole tower in its own dtype (no autocast): drop the fp32 master copies
+        dtype = next(tower.subsample_conv_projection.parameters()).dtype
+        for mod in [*tower.layers[cfg.get("start", 10) :], tower.output_proj]:
+            mod.to(dtype)
     tower.requires_grad_(False)
