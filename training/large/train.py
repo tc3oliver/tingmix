@@ -358,7 +358,7 @@ def run(a):
             st["best"], st["best_step"] = score, st["step"]
             export("best.pt", rec)
             rec["new_best"] = True
-        if st["step"] and st["step"] % (a.eval_every * 4) == 0:
+        if st["step"]:  # every eval: candidates for checkpoint averaging (tools/avg_ckpt.py)
             export(f"eval_{st['step']:06d}.pt", rec)
         record(rec)
 
