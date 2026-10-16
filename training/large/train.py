@@ -45,8 +45,17 @@ def parse(argv=None):
     p.add_argument("--mode", choices=["frozen", "lora", "partial"], default="lora")
     p.add_argument("--init", help="Embed2ASR reader checkpoint (.pt with model/itos/cfg/tok)")
     p.add_argument("--train", nargs="+", help="PATH:HOURS[:nd] per pool (nd = drop rows with digits)")
-    p.add_argument("--dev", nargs="*", default=[], help="NAME=PATH:METRIC (cer|wer|mer|mixmer); all are selection keys")
+    p.add_argument(
+        "--dev", nargs="*", default=[], help="NAME=PATH:METRIC[:nd] (cer|wer|mer|mixmer; nd = drop digit rows); all are selection keys"
+    )
     p.add_argument("--map-prefix", nargs="*", default=[], help="OLD=NEW audio path rewrites")
+    p.add_argument(
+        "--features",
+        choices=["audio", "cache"],
+        default="audio",
+        help="cache: read cached encoder states instead of audio (frozen: final 1536-d; partial: layer-10 1024-d)",
+    )
+    p.add_argument("--feat-root", help="dir that relative cache paths in the manifests are relative to")
     p.add_argument("--lora-r", type=int, default=16)
     p.add_argument("--lora-alpha", type=float, default=32.0)
     p.add_argument("--lora-dropout", type=float, default=0.0)
@@ -136,12 +145,17 @@ def run(a):
     tok = Tok(init["itos"], init["tok"].get("sp"))
 
     pools, paths = [], [a.init]
+    feat_root = a.feat_root if a.features == "cache" else None
+    if a.features == "cache" and a.mode == "lora":
+        raise Permanent("LoRA adapts every layer: it must run the encoder from audio (features: audio)")
     for spec in a.train:
         parts = spec.split(":")
         path, hours, nd = parts[0], float(parts[1]), len(parts) > 2 and parts[2] == "nd"
-        rows = D.load_rows(path, pm, nodigit=nd)
+        rows = D.load_rows(path, pm, nodigit=nd, feat_root=feat_root)
         n0 = len(rows)
         rows = [r for r in rows if 0 < ctc_min_len(tok.encode(r["text"])) <= r["frames"]]
+        if a.features == "cache" and any("bin" not in r for r in rows[:100]):
+            raise Permanent(f"{path}: rows have no feature-cache reference")
         print(f"pool {path}: {len(rows)}/{n0} CTC-feasible, {sum(r['seconds'] for r in rows) / 3600:.1f} h, {hours} h/epoch", flush=True)
         if not rows:
             raise Permanent(f"pool {path} has no usable rows")
@@ -150,8 +164,9 @@ def run(a):
     devsets = {}
     for spec in a.dev:
         name, rest = spec.split("=", 1)
-        path, metric = rest.rsplit(":", 1)
-        devsets[name] = (D.load_rows(path, pm), metric)
+        nd = rest.endswith(":nd")
+        path, metric = rest.removesuffix(":nd").rsplit(":", 1)
+        devsets[name] = (D.load_rows(path, pm, nodigit=nd, feat_root=feat_root), metric)
         paths.append(path)
     data_hash = sha_files(paths)
     cfg_now = {k: v for k, v in vars(a).items() if k not in MUTABLE}
@@ -172,7 +187,9 @@ def run(a):
     reader.load_state_dict(init["model"])
     reader.train()
     n_enc = sum(p.numel() for p in enc_params)
-    print(f"mode {a.mode}: encoder trainable {n_enc / 1e6:.2f}M, reader {sum(p.numel() for p in reader.parameters()) / 1e6:.2f}M", flush=True)
+    print(
+        f"mode {a.mode}: encoder trainable {n_enc / 1e6:.2f}M, reader {sum(p.numel() for p in reader.parameters()) / 1e6:.2f}M", flush=True
+    )
 
     groups = [{"params": list(reader.parameters()), "lr": a.lr_reader}]
     if enc_params:
@@ -215,7 +232,9 @@ def run(a):
             if r["rng"]["cuda"] is not None and dev.type == "cuda":
                 torch.cuda.set_rng_state(r["rng"]["cuda"])
             gen.set_state(r["rng"]["gen"])
-            print(f"[resume] {rp}: step {st['step']} epoch {st['epoch']} batch {st['batch']} train {st['train_s'] / 3600:.2f} h", flush=True)
+            print(
+                f"[resume] {rp}: step {st['step']} epoch {st['epoch']} batch {st['batch']} train {st['train_s'] / 3600:.2f} h", flush=True
+            )
 
     def snapshot():
         return {
@@ -265,8 +284,22 @@ def run(a):
     for name, (rows, metric) in devsets.items():
         order = sorted(range(len(rows)), key=lambda i: rows[i]["seconds"])
         bs = [order[i : i + 32] for i in range(0, len(order), 32)]
-        dev_mel[name] = (rows, metric, bs, list(D.loader(rows, bs, fe, tok.encode, a.workers)))
+        dev_mel[name] = (rows, metric, bs, list(D.loader(rows, bs, fe, tok.encode, a.workers, 0, a.features)))
     print(f"dev mel ready in {time.time() - t0:.0f}s: {', '.join(f'{k}={len(v[0])}' for k, v in dev_mel.items())}", flush=True)
+
+    def forward_enc(x, m, mode):
+        """-> (features [B,T,1536] fp32, lengths [B] on device) from audio or from cached states."""
+        if a.features == "audio":
+            return E.encode(tower, x.to(dev, non_blocking=True), m.to(dev, non_blocking=True), mode, a.start)
+        lens = m.to(dev)
+        x = x.to(dev, non_blocking=True)
+        if x.shape[-1] == E.FEATURE_DIM:
+            if mode != "frozen":
+                raise Permanent("final-feature cache can only train a frozen encoder")
+            return x.float(), lens
+        with torch.set_grad_enabled(mode == "partial" and torch.is_grad_enabled()):
+            y = E.top(tower, x, lens, a.start).float()
+        return y * (torch.arange(x.shape[1], device=dev)[None] < lens[:, None])[..., None], lens
 
     @torch.no_grad()
     def evaluate():
@@ -275,7 +308,7 @@ def run(a):
         for name, (rows, metric, bs, batches) in dev_mel.items():
             pairs, mixed = [], []
             for b, (mel, mask, _, _, texts, langs) in zip(bs, batches):
-                x, lens = E.encode(tower, mel.to(dev), mask.to(dev), "frozen" if a.mode == "frozen" else a.mode, a.start)
+                x, lens = forward_enc(mel, mask, a.mode)
                 ids = reader(x, lens.cpu()).argmax(-1).cpu().tolist()
                 for seq, L, ref, lg in zip(ids, lens.tolist(), texts, langs):
                     hyp = tok.decode(collapse_ctc(seq[:L]))
@@ -328,14 +361,16 @@ def run(a):
     last_save, t_seg = time.time(), time.time()
     agg = {"loss": 0.0, "n": 0, "inf": 0, "audio_s": 0.0, "wait": 0.0, "gn": 0.0, "gne": 0.0, "t0": time.time()}
     torch.cuda.reset_peak_memory_stats() if dev.type == "cuda" else None
-    done = False
+    done = st["step"] >= cap or st["train_s"] >= budget
     while not done:
         rows = sampler.epoch(st["epoch"])
         batches = D.make_batches(rows, a.max_seconds, a.max_bs, random.Random(a.seed * 7919 + st["epoch"]))
         t_wait = time.time()
-        for k, (mel, mask, tg, tl, _, _) in enumerate(D.loader(rows, batches, fe, tok.encode, a.workers, st["batch"]), st["batch"]):
+        for k, (mel, mask, tg, tl, _, _) in enumerate(
+            D.loader(rows, batches, fe, tok.encode, a.workers, st["batch"], a.features), st["batch"]
+        ):
             agg["wait"] += time.time() - t_wait
-            x, lens = E.encode(tower, mel.to(dev, non_blocking=True), mask.to(dev, non_blocking=True), a.mode, a.start)
+            x, lens = forward_enc(mel, mask, a.mode)
             x = D.time_mask(x, lens, a.time_mask, gen)
             logits = reader(x, lens.cpu())
             lp = logits.float().log_softmax(-1).transpose(0, 1)

@@ -159,17 +159,64 @@ def docker_create(exp, cfg, job, sha, allow_code_change=False):
     mounts += [f"{d}:{d}:ro" for d in E.get("TINGMIX_RO_MOUNTS", "").split(",") if d]
     uid, gid = os.getuid(), os.getgid()
     cmd = [
-        "docker", "run", "-d", "--name", cname(exp),
-        "--restart", f"on-failure:{job.get('restarts', 3)}",
-        "--label", "tingmix=1", "--label", f"tingmix.exp={exp}", "--label", f"tingmix.gpu={job['gpu']}", "--label", f"tingmix.commit={sha}",
-        "--device=/dev/kfd", f"--device=/dev/dri/{render}", "--group-add", "video", "--group-add", str(job.get("render_gid", 993)),
-        "--user", f"{uid}:{gid}", "--ipc=host", "--shm-size=32g",
-        "--memory", str(job.get("memory", "96g")), "--cpus", str(job.get("cpus", 32)),
-        "-e", f"HOME={HOME}/home", "-e", "USER=tingmix", "-e", "LOGNAME=tingmix",
-        "-e", f"HF_HOME={HOME}/hf", "-e", "HF_HUB_OFFLINE=1", "-e", "PYTHONUNBUFFERED=1", "-e", "OMP_NUM_THREADS=4",
-        "-e", f"PYTHONPATH={code}/src:{code}:{site}", "-e", f"TINGMIX_COMMIT={sha}", "-e", f"TINGMIX_EXP={exp}",
-        "-e", "PYTORCH_HIP_ALLOC_CONF=expandable_segments:True",
-        "-w", str(code),
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        cname(exp),
+        "--restart",
+        f"on-failure:{job.get('restarts', 3)}",
+        "--label",
+        "tingmix=1",
+        "--label",
+        f"tingmix.exp={exp}",
+        "--label",
+        f"tingmix.gpu={job['gpu']}",
+        "--label",
+        f"tingmix.commit={sha}",
+        "--device=/dev/kfd",
+        f"--device=/dev/dri/{render}",
+        "--group-add",
+        "video",
+        "--group-add",
+        str(job.get("render_gid", 993)),
+        "--user",
+        f"{uid}:{gid}",
+        "--ipc=host",
+        "--shm-size=32g",
+        "--memory",
+        str(job.get("memory", "96g")),
+        "--cpus",
+        str(job.get("cpus", 32)),
+        "-e",
+        f"HOME={HOME}/home",
+        "-e",
+        "USER=tingmix",
+        "-e",
+        "LOGNAME=tingmix",
+        "-e",
+        f"HF_HOME={HOME}/hf",
+        "-e",
+        "HF_HUB_OFFLINE=1",
+        "-e",
+        "PYTHONUNBUFFERED=1",
+        "-e",
+        "OMP_NUM_THREADS=4",
+        "-e",
+        f"PYTHONPATH={code}/src:{code}:{site}",
+        "-e",
+        f"TINGMIX_COMMIT={sha}",
+        "-e",
+        f"TINGMIX_EXP={exp}",
+        "-e",
+        "PYTORCH_HIP_ALLOC_CONF=expandable_segments:True",
+        # per-run MIOpen db/cache: a shared $HOME/.config/miopen races between containers (rename of *.ufdb.txt.temp)
+        "-e",
+        f"MIOPEN_USER_DB_PATH={run}/.miopen",
+        "-e",
+        f"MIOPEN_CUSTOM_CACHE_DIR={run}/.miopen",
+        "-w",
+        str(code),
     ]
     for m in mounts:
         cmd += ["-v", m]
@@ -194,8 +241,16 @@ def launch(a):
     with Jobs() as J:
         J.d["jobs"] = [j for j in J.d["jobs"] if j["exp"] != a.exp]
         J.d["jobs"].append(
-            {"exp": a.exp, "container": cname(a.exp), "gpu": job["gpu"], "run": str(run), "commit": sha,
-             "launched": time.strftime("%F %T"), "desired": "running", "reconcile_restarts": 0}
+            {
+                "exp": a.exp,
+                "container": cname(a.exp),
+                "gpu": job["gpu"],
+                "run": str(run),
+                "commit": sha,
+                "launched": time.strftime("%F %T"),
+                "desired": "running",
+                "reconcile_restarts": 0,
+            }
         )
     print(f"launched {cname(a.exp)} on GPU {job['gpu']} (commit {sha[:10]}); log: {run}/train.log")
 
@@ -227,7 +282,12 @@ def resume(a):
     with Jobs() as J:
         j = J.get(a.exp)
         if j:
-            j.update(desired="running", reconcile_restarts=0, resumed=time.strftime("%F %T"), commit=(run / "code" / "COMMIT").read_text().strip())
+            j.update(
+                desired="running",
+                reconcile_restarts=0,
+                resumed=time.strftime("%F %T"),
+                commit=(run / "code" / "COMMIT").read_text().strip(),
+            )
 
 
 def stop(a):
@@ -272,8 +332,14 @@ def status(a):
             continue
         ll = last_lines(j["run"])
         rows.append(
-            {**j, "container_state": cstate(j["exp"]), "trainer": run_status(j["run"]), "last_train": ll.get("train"),
-             "last_eval": ll.get("eval"), "gpu_free_gib": free_gib(j["gpu"])}
+            {
+                **j,
+                "container_state": cstate(j["exp"]),
+                "trainer": run_status(j["run"]),
+                "last_train": ll.get("train"),
+                "last_eval": ll.get("eval"),
+                "gpu_free_gib": free_gib(j["gpu"]),
+            }
         )
     if a.json:
         print(json.dumps(rows, indent=1, ensure_ascii=False))
@@ -283,10 +349,14 @@ def status(a):
     for r in rows:
         c, t, lt, le = r["container_state"] or {}, r["trainer"], r["last_train"] or {}, r["last_eval"] or {}
         print(f"== {r['exp']}  GPU{r['gpu']} (free {r['gpu_free_gib']} GiB)  desired={r['desired']}  commit {r['commit'][:10]}")
-        print(f"   container: {c.get('status', 'MISSING')} exit={c.get('exit')} docker_restarts={c.get('restarts')} reconcile_restarts={r['reconcile_restarts']}")
+        print(
+            f"   container: {c.get('status', 'MISSING')} exit={c.get('exit')} docker_restarts={c.get('restarts')} reconcile_restarts={r['reconcile_restarts']}"
+        )
         print(f"   trainer:   {t.get('state')} {t.get('reason', '')} ({t.get('time', '')})")
         if lt:
-            print(f"   train:     step {lt['step']} ep {lt['epoch']} loss {lt['loss']} lr {lt['lr']} {lt.get('audio_h_per_h')} audio-h/h, train {lt.get('train_h')} h")
+            print(
+                f"   train:     step {lt['step']} ep {lt['epoch']} loss {lt['loss']} lr {lt['lr']} {lt.get('audio_h_per_h')} audio-h/h, train {lt.get('train_h')} h"
+            )
         if le:
             print(f"   eval:      {json.dumps({k: v for k, v in le.items() if k not in ('type',)}, ensure_ascii=False)}")
 
