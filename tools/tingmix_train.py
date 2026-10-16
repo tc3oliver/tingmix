@@ -15,7 +15,8 @@ errors (status FAILED, no restart) and non-zero on transient ones (Docker restar
 `reconcile` covers what Docker's policy does not: host/daemon restarts and exhausted restart budgets (bounded).
 
 Experiment file: trainer options (training/large/train.py) plus a `job:` block:
-  job: {gpu: 7, restarts: 3, memory: 96g, cpus: 32, image: <docker image>}
+  job: {gpu: 7, restarts: 3, memory: 96g, cpus: 32, image: <docker image>,
+        module: training.large.train, code_repo: <git repo>, code_ref: <commit/tag>}   (last three optional)
 Host settings come from the environment (or $TINGMIX_HOME/host.env, KEY=VALUE lines):
   TINGMIX_HOME (runs/, experiments/, site/, hf/), TINGMIX_STATE (RUNNING_JOBS.json), TINGMIX_IMAGE,
   TINGMIX_GPU_RENDER ("<gpu>=<render node>,...", e.g. "0=renderD128"), TINGMIX_RO_MOUNTS (comma list of read-only host dirs)."""
@@ -126,17 +127,19 @@ def render_map():
     return dict(x.split("=") for x in m.split(","))
 
 
-def snapshot_code(run: Path, commit="HEAD"):
-    """Freeze the code of a commit into <run>/code (the trainer never runs from the live working tree)."""
-    dirty = sh("git", "-C", str(REPO), "status", "--porcelain", "--untracked-files=no", "--", "src", "training", "tools").stdout.strip()
+def snapshot_code(run: Path, commit="HEAD", repo: Path = REPO):
+    """Freeze the code of a commit into <run>/code (the trainer never runs from the live working tree).
+    job.code_repo / job.code_ref select another trainer repository (e.g. an Embed2ASR release tag)."""
+    dirty = sh("git", "-C", str(repo), "status", "--porcelain", "--untracked-files=no", "--", "src", "training", "tools").stdout.strip()
     if dirty and commit == "HEAD":
         print(f"warning: uncommitted changes are NOT included (snapshot = {commit}):\n{dirty}", file=sys.stderr)
-    sha = sh("git", "-C", str(REPO), "rev-parse", commit, check=True).stdout.strip()
+    sha = sh("git", "-C", str(repo), "rev-parse", commit, check=True).stdout.strip()
     code = run / "code"
     if code.exists():
         shutil.rmtree(code)
     code.mkdir(parents=True)
-    git = subprocess.Popen(["git", "-C", str(REPO), "archive", "--format=tar", sha, "src", "training", "tools"], stdout=subprocess.PIPE)
+    paths = [x for x in ("src", "training", "tools") if sh("git", "-C", str(repo), "cat-file", "-e", f"{sha}:{x}").returncode == 0]
+    git = subprocess.Popen(["git", "-C", str(repo), "archive", "--format=tar", sha, *paths], stdout=subprocess.PIPE)
     subprocess.run(["tar", "-x", "-C", str(code)], stdin=git.stdout, check=True)
     if git.wait():
         raise SystemExit("git archive failed")
@@ -218,11 +221,12 @@ def docker_create(exp, cfg, job, sha, allow_code_change=False):
         "-e",
         f"MIOPEN_CUSTOM_CACHE_DIR={run}/.miopen",
         "-w",
-        str(code),
+        str(job.get("workdir", code)),
     ]
     for m in mounts:
         cmd += ["-v", m]
-    cmd += [image, "bash", "-c", f"exec python -m training.large.train --config {run}/trainer.yaml >> {run}/train.log 2>&1"]
+    module = job.get("module", "training.large.train")
+    cmd += [image, "bash", "-c", f"exec python -m {module} --config {run}/trainer.yaml >> {run}/train.log 2>&1"]
     sh(*cmd, check=True)
 
 
@@ -238,7 +242,7 @@ def launch(a):
         return
     run.mkdir(parents=True, exist_ok=True)
     shutil.copy(src, run / "experiment.yaml")
-    sha = snapshot_code(run, a.commit)
+    sha = snapshot_code(run, job.get("code_ref", a.commit), Path(job.get("code_repo", REPO)))
     docker_create(a.exp, cfg, job, sha)
     with Jobs() as J:
         J.d["jobs"] = [j for j in J.d["jobs"] if j["exp"] != a.exp]
@@ -269,7 +273,7 @@ def resume(a):
         if cs:
             sh("docker", "stop", "-t", "300", cname(a.exp))
             sh("docker", "rm", cname(a.exp), check=True)
-        sha = snapshot_code(run, a.commit)
+        sha = snapshot_code(run, job.get("code_ref", a.commit), Path(job.get("code_repo", REPO)))
         docker_create(a.exp, cfg, job, sha, allow_code_change=True)
         print(f"recreated {cname(a.exp)} with new code {sha[:10]}")
     elif cs and cs["status"] == "running":
