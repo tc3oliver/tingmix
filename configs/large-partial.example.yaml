@@ -1,0 +1,26 @@
+# TingMix-Large LoRA fine-tuning (training/large/train.py). Paths are placeholders: point them at your own
+# manifests (jsonl rows: audio, text, lang, seconds, frames) and an Embed2ASR reader checkpoint.
+#   python -m training.large.train --config configs/large-lora.example.yaml
+# For a supervised, restartable run use tools/tingmix_train.py (add a `job:` block, see docs/training.md).
+out: runs/large-partial
+mode: partial              # layers 11-12 + output_proj train (L1-10 frozen)
+init: path/to/embed2asr-reader.pt
+train:                     # PATH:HOURS_PER_EPOCH[:nd]  (nd = drop labels with digits)
+  - data/train_zh.jsonl:10
+  - data/train_en.jsonl:60:nd
+  - data/train_mixed.jsonl:8:nd
+dev:                       # NAME=PATH:METRIC[:nd]; every dev set is a model-selection key
+  - zh=data/dev_zh.jsonl:cer
+  - en=data/dev_en.jsonl:wer:nd
+  - mixed=data/dev_mixed.jsonl:mixmer:nd
+lr_reader: 1.0e-4
+lr_enc: 3.0e-5
+start: 10
+warmup: 500
+total_steps: 50000         # cosine schedule length
+total_steps_cap: 14000     # stop here (pilot); raise it later to continue the same run exactly
+max_seconds: 480           # padded audio seconds per batch
+max_bs: 64
+eval_every: 1500
+save_every_min: 15
+max_hours: 0               # wall-time budget summed over resumes (0 = none)

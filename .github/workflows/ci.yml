@@ -1,0 +1,47 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: install (CPU torch, no weights, no token)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ".[dev,server,train]"
+      - name: ruff
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: pytest (fast; slow tests need the real encoder, private data or a GPU)
+        run: pytest -q
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar xz gitleaks
+          ./gitleaks git --redact --verbose --exit-code 1 .
+      - name: no data, manifests, checkpoints or private paths in the tree
+        run: |
+          ! git ls-files | grep -E '\.(jsonl|pt|safetensors|bin|wav|flac|mp3|npz)$'
+          ! git grep -n -E '/home/[a-z]+/|renderD[0-9]+|HF_TOKEN=|hf_[A-Za-z0-9]{20,}' -- ':!.github/workflows/ci.yml'

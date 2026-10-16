@@ -1,5 +1,6 @@
 """Encoder parity on the real EmbeddingGemma 2 weights (slow: needs the model download; GPU optional)."""
 
+import os
 import sys
 
 import numpy as np
@@ -39,7 +40,7 @@ def test_frozen_matches_forward(setup):
 
 def test_split_at_10_matches_eg2_cache(setup):
     E, tower, mel, mask, ref = setup
-    sys.path.insert(0, "/home/oliver/datasets/speech")
+    sys.path.insert(0, os.environ.get("EG2_CACHE_DIR", ""))  # dir holding the eg2_cache.py research helper; skip if absent
     eg2 = pytest.importorskip("eg2_cache")
     with torch.no_grad(), torch.autocast(mel.device.type, torch.bfloat16, enabled=mel.device.type == "cuda"):
         h, lens = E.subsample(tower, mel, mask)

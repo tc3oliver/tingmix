@@ -135,7 +135,14 @@ class BatchSet(torch.utils.data.Dataset):
             xs = [read_feat(r) for r in rs]
             x, m = torch.nn.utils.rnn.pad_sequence(xs, batch_first=True), torch.tensor([len(t) for t in xs])
         else:
-            inp = self.fe([decode(r["audio"]) for r in rs], sampling_rate=16000, return_tensors="pt")
+            wavs = []
+            for r in rs:
+                try:
+                    wavs.append(decode(r["audio"]))
+                except (OSError, ValueError) as e:  # unreadable file: keep the batch shape;
+                    print(f"[data] cannot decode {r['audio']}: {e}; replaced by 0.5 s of zeros", flush=True)
+                    wavs.append(np.zeros(8000, np.float32))  # rare (audited); short labels may still train on it
+            inp = self.fe(wavs, sampling_rate=16000, return_tensors="pt")
             x, m = inp["input_features"].to(torch.bfloat16), inp["input_features_mask"]
         return (
             x,
