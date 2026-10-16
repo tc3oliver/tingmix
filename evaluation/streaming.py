@@ -217,11 +217,17 @@ def main() -> None:
     ap.add_argument("--max-s", type=float, default=20.0)
     ap.add_argument("--device", default=None)
     ap.add_argument("--lm", help="character n-gram LM file -> CTC prefix beam search for every decode")
+    ap.add_argument("--lm-alpha", type=float, default=0.25)
+    ap.add_argument("--lm-beta", type=float, default=1.5)
     ap.add_argument("--session", default="{}", help="JSON of StreamingSession kwargs (+ threshold_db), e.g. '{\"preroll_ms\": 500}'")
     ap.add_argument("--grid", help="JSON {kwarg: [values]}: run every combination, write only summaries (use hop_ms=1e6 to skip partials)")
     args = ap.parse_args()
 
-    model = Timed(load_model(args.model_path, device=args.device, **({"lm": args.lm} if args.lm else {})))
+    model = Timed(
+        load_model(
+            args.model_path, device=args.device, **({"lm": args.lm, "lm_alpha": args.lm_alpha, "lm_beta": args.lm_beta} if args.lm else {})
+        )
+    )
     model.transcribe_batch([np.zeros(SAMPLE_RATE, np.float32) + 0.01])  # warm-up
     base = json.loads(args.session)
     if args.grid:
