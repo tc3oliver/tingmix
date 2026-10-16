@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tingmix"
+dynamic = ["version"]
+description = "Real-time speech recognition for Taiwanese Mandarin, English and intra-sentence code-switching"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "tc3oliver" }]
+dependencies = [
+    "numpy",
+]
+
+[project.optional-dependencies]
+# TingMix-Large: EmbeddingGemma 2 audio encoder + GRU-CTC reader, pinned to the Embed2ASR v0.1.0 release (one-way dependency)
+large = [
+    "torch>=2.1",
+    "transformers==5.19.0",
+    "embed2asr @ git+https://github.com/tc3oliver/embed2asr.git@v0.1.0",
+]
+server = ["websockets>=12"]
+mic = ["sounddevice"]
+train = ["pyyaml"]
+dev = ["pytest", "ruff", "build"]
+
+[project.scripts]
+tingmix = "tingmix.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "tingmix.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+addopts = "-m 'not slow'"
+markers = ["slow: needs the real EmbeddingGemma 2 encoder (download), private data and/or a GPU"]
+
+[tool.ruff]
+line-length = 140
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]
