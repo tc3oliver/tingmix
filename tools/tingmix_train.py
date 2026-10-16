@@ -19,7 +19,7 @@ Experiment file: trainer options (training/large/train.py) plus a `job:` block:
         module: training.large.train, code_repo: <git repo>, code_ref: <commit/tag>}   (last three optional)
 Host settings come from the environment (or $TINGMIX_HOME/host.env, KEY=VALUE lines):
   TINGMIX_HOME (runs/, experiments/, site/, hf/), TINGMIX_STATE (RUNNING_JOBS.json), TINGMIX_IMAGE,
-  TINGMIX_GPU_RENDER ("<gpu>=<render node>,...", e.g. "0=renderD128"), TINGMIX_RO_MOUNTS (comma list of read-only host dirs)."""
+  TINGMIX_GPU_RENDER ("<gpu>=<render node>,...", e.g. "0=renderD<N>"), TINGMIX_RO_MOUNTS (comma list of read-only host dirs)."""
 
 from __future__ import annotations
 
@@ -123,7 +123,7 @@ def run_status(run):
 def render_map():
     m = E.get("TINGMIX_GPU_RENDER")
     if not m:
-        raise SystemExit("set TINGMIX_GPU_RENDER (host.env), e.g. 0=renderD128; check /dev/dri/by-path for your GPUs")
+        raise SystemExit("set TINGMIX_GPU_RENDER (host.env), e.g. 0=renderD<N>; check /dev/dri/by-path for your GPUs")
     return dict(x.split("=") for x in m.split(","))
 
 
