@@ -23,6 +23,9 @@ def main(argv=None):
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--batch-files", type=int, default=16, help="files handed to the model per call (encoded one file at a time)")
     p.add_argument("--limit", type=int, default=0, help="first N rows per set (smoke tests only)")
+    p.add_argument(
+        "--by-lang", action="store_true", help="also score per `lang` (zh-TW CER, en-US WER, mix MER) like the Embed2ASR benchmark"
+    )
     p.add_argument("--device")
     p.add_argument("--lm", help="character n-gram LM file (Embed2ASR format) -> prefix beam search")
     p.add_argument("--lm-alpha", type=float, default=0.25)
@@ -31,7 +34,7 @@ def main(argv=None):
     a = p.parse_args(argv)
 
     from embed2asr.audio import load_audio
-    from embed2asr.metrics import corpus
+    from embed2asr.metrics import corpus, score
 
     from tingmix.core.registry import load_model
 
@@ -68,6 +71,8 @@ def main(argv=None):
             res["all"] = corpus(pairs, "MER")
         else:
             res = corpus(pairs, m.upper())
+        if a.by_lang:
+            res["by_lang"] = score({"ref": r["text"], "hyp": h, "lang": r.get("lang")} for r, h in zip(rows, hyps))
         res.update(manifest=path, nodigit=nd, audio_h=round(audio_s / 3600, 3), rtf=round(dt / max(audio_s, 1e-9), 4))
         summary["sets"][name] = res
         print(json.dumps({name: res}, ensure_ascii=False), flush=True)
