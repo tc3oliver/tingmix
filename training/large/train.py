@@ -142,6 +142,8 @@ def run(a):
     C.set_status(a.out, "RUNNING", "starting")
     pm = [tuple(x.split("=", 1)) for x in a.map_prefix]
     init = torch.load(a.init, map_location="cpu", weights_only=False)
+    if "reader" in init:  # TingMix export (reader + encoder delta) -> same keys as an Embed2ASR reader checkpoint
+        init = {**init, "model": init["reader"], "cfg": init["reader_cfg"]}
     tok = Tok(init["itos"], init["tok"].get("sp"))
 
     pools, paths = [], [a.init]
@@ -183,6 +185,15 @@ def run(a):
     else:
         enc_params = []
     enc_cfg = {"mode": a.mode, "lora_r": a.lora_r, "lora_alpha": a.lora_alpha, "lora_layers": lora_layers, "start": a.start}
+    if init.get("enc"):  # warm-start the encoder adaptation too; it must be the same kind of delta
+        ic = init["enc_cfg"]
+        if ic["mode"] != a.mode or (a.mode == "lora" and (ic["lora_r"], ic["lora_alpha"], ic["lora_layers"]) != (a.lora_r, a.lora_alpha, lora_layers)):
+            raise Permanent(f"--init encoder delta {ic} does not match mode {a.mode} r {a.lora_r} layers {lora_layers}")
+        own = dict(tower.named_parameters())
+        with torch.no_grad():
+            for n, t in init["enc"].items():
+                own[n].copy_(t.to(own[n].dtype))
+        print(f"[init] encoder delta from {a.init}: {len(init['enc'])} tensors ({ic})", flush=True)
     reader = Reader(**init["cfg"]).to(dev)
     reader.load_state_dict(init["model"])
     reader.train()
