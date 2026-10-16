@@ -171,11 +171,12 @@ def run(
     return stats
 
 
-def load_l10_index(cache_dir) -> list[dict]:
-    """All rows of all complete shards, sorted by manifest row id; row['bin'] = payload path."""
-    d, rows = Path(cache_dir), []
+def load_l10_index(cache_dir, verify: bool = False) -> list[dict]:
+    """All rows of all complete shards, sorted by manifest row id; row['bin'] = absolute payload path.
+    verify=True re-hashes every shard (slow); otherwise the .sha256 commit marker is trusted."""
+    d, rows = Path(cache_dir).resolve(), []
     for j in sorted(d.glob("shard_*.jsonl")):
-        if not j.with_suffix(".sha256").exists():
+        if not j.with_suffix(".sha256").exists() or (verify and not shard_ok(j.with_suffix(""))):
             continue
         for line in j.open(encoding="utf-8"):
             r = json.loads(line)
@@ -193,6 +194,13 @@ def read_l10(row: dict) -> torch.Tensor:
         mm = _mm[row["bin"]] = np.memmap(row["bin"], dtype=np.int16, mode="r")
     a = mm[row["off"] // 2 : row["off"] // 2 + row["frames"] * row["dim"]]
     return torch.from_numpy(np.array(a)).view(torch.bfloat16).view(row["frames"], row["dim"])
+
+
+def merge_index(cache_dir) -> int:
+    """Write DIR/index.jsonl (rows of sha-verified shards, with absolute 'bin') for trainers that take one jsonl per pool."""
+    rows = load_l10_index(cache_dir, verify=True)
+    _atomic_write(Path(cache_dir) / "index.jsonl", "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    return len(rows)
 
 
 def check_frames(l10_rows: list[dict], final_rows: list[dict], n: int = 20) -> int:
@@ -231,14 +239,20 @@ def main() -> None:
     from tingmix.models.large.encoder import ENCODER_ID, ENCODER_REVISION
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--manifest", type=Path, required=True)
-    ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--manifest", type=Path)
+    ap.add_argument("--out", type=Path)
+    ap.add_argument("--merge-index", type=Path, metavar="DIR", help="write DIR/index.jsonl from verified shards and exit")
     ap.add_argument("--shard-rows", type=int, default=2000)
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--num-workers", type=int, default=1)
     ap.add_argument("--worker-id", type=int, default=0)
     ap.add_argument("--max-shards", type=int)
     a = ap.parse_args()
+    if a.merge_index:
+        print(f"{merge_index(a.merge_index)} rows -> {a.merge_index}/index.jsonl")
+        return
+    if not (a.manifest and a.out):
+        ap.error("--manifest and --out are required")
     encode, load = make_encoder()
     stats = run(
         a.manifest,

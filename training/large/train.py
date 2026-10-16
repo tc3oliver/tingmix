@@ -187,7 +187,9 @@ def run(a):
     enc_cfg = {"mode": a.mode, "lora_r": a.lora_r, "lora_alpha": a.lora_alpha, "lora_layers": lora_layers, "start": a.start}
     if init.get("enc"):  # warm-start the encoder adaptation too; it must be the same kind of delta
         ic = init["enc_cfg"]
-        if ic["mode"] != a.mode or (a.mode == "lora" and (ic["lora_r"], ic["lora_alpha"], ic["lora_layers"]) != (a.lora_r, a.lora_alpha, lora_layers)):
+        if ic["mode"] != a.mode or (
+            a.mode == "lora" and (ic["lora_r"], ic["lora_alpha"], ic["lora_layers"]) != (a.lora_r, a.lora_alpha, lora_layers)
+        ):
             raise Permanent(f"--init encoder delta {ic} does not match mode {a.mode} r {a.lora_r} layers {lora_layers}")
         own = dict(tower.named_parameters())
         with torch.no_grad():

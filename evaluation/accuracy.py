@@ -24,6 +24,10 @@ def main(argv=None):
     p.add_argument("--batch-files", type=int, default=16, help="files handed to the model per call (encoded one file at a time)")
     p.add_argument("--limit", type=int, default=0, help="first N rows per set (smoke tests only)")
     p.add_argument("--device")
+    p.add_argument("--lm", help="character n-gram LM file (Embed2ASR format) -> prefix beam search")
+    p.add_argument("--lm-alpha", type=float, default=0.25)
+    p.add_argument("--lm-beta", type=float, default=1.5)
+    p.add_argument("--beam", type=int, default=16)
     a = p.parse_args(argv)
 
     from embed2asr.audio import load_audio
@@ -32,9 +36,10 @@ def main(argv=None):
     from tingmix.core.registry import load_model
 
     a.out.mkdir(parents=True, exist_ok=True)
-    model = load_model(a.model, device=a.device)
+    lm = dict(lm=a.lm, lm_alpha=a.lm_alpha, lm_beta=a.lm_beta, beam=a.beam) if a.lm else {}
+    model = load_model(a.model, device=a.device, **lm)
     pm = [tuple(x.split("=", 1)) for x in a.map_prefix]
-    summary = {"model": a.model, "time": time.strftime("%F %T"), "sets": {}}
+    summary = {"model": a.model, "lm": lm or None, "time": time.strftime("%F %T"), "sets": {}}
     for spec in a.set:
         name, rest = spec.split("=", 1)
         nd = rest.endswith(":nd")

@@ -7,7 +7,7 @@ name = "tingmix"
 dynamic = ["version"]
 description = "Real-time speech recognition for Taiwanese Mandarin, English and intra-sentence code-switching"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "Apache-2.0"
 authors = [{ name = "tc3oliver" }]
 dependencies = [
@@ -43,7 +43,7 @@ markers = ["slow: needs the real EmbeddingGemma 2 encoder (download), private da
 
 [tool.ruff]
 line-length = 140
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
