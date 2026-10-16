@@ -18,7 +18,7 @@ explicitly approved by the maintainer; nothing is uploaded automatically.
 
 ## Training data
 
-Common Voice zh-TW and English-adjacent sets, Taiwan Legislative Yuan (Parliament) speech, LibriSpeech, VoxPopuli,
+Common Voice zh-TW, Taiwan Legislative Yuan (Parliament) speech, LibriSpeech, VoxPopuli,
 AMI, FLEURS en_us, ASCEND (Mandarin-English code-switching). No training audio, transcripts, manifests or features are
 distributed. Test sets used for the public benchmark were excluded from training and LM text by audio path and by
 sentence (non-trivial sentences).
