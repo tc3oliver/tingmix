@@ -1,0 +1,154 @@
+"""Training data for TingMix-Large: manifest rows, rotate sampler, batches, audio -> log-mel collate.
+
+Manifest row (jsonl): audio (path), text (normalized), lang, seconds, frames (25 fps encoder frames). Rows that point into
+a feature cache (path/off) are fine: only audio/text/lang/seconds/frames are used. Paths can be rewritten with
+--map-prefix OLD=NEW (e.g. a container mount point).
+
+Data order is a pure function of (seed, epoch, pools): resume needs only (epoch, batch index)."""
+
+from __future__ import annotations
+
+import json
+import random
+from pathlib import Path
+
+import torch
+
+
+def load_rows(path, prefix_map=(), nodigit=False):
+    rows = []
+    for line in Path(path).open(encoding="utf-8"):
+        r = json.loads(line)
+        a = r["audio"]
+        for old, new in prefix_map:
+            if a.startswith(old):
+                a = new + a[len(old) :]
+                break
+        rows.append(
+            {
+                "audio": a,
+                "text": r["text"].replace("臺", "台"),
+                "lang": r.get("lang"),
+                "seconds": float(r["seconds"]),
+                "frames": int(r["frames"]),
+            }
+        )
+    if nodigit:  # labels with digits: audio says the number in words, label does not (as in the Embed2ASR-v1 recipe)
+        rows = [r for r in rows if not any(c.isdigit() for c in r["text"])]
+    return rows
+
+
+class RotateSampler:
+    """Per epoch take up to HOURS of the next unused rows of each pool's shuffled order; reshuffle after a full pass.
+    Port of the Embed2ASR-v1 rotate sampler (same seeding): epoch e's rows are a pure function of (seed, pools, e)."""
+
+    def __init__(self, pools, seed):
+        self.pools, self.seed = pools, seed  # [(rows, hours_per_epoch)]
+        self._orders, self._state = {}, {0: [(0, 0)] * len(pools)}
+
+    def _order(self, k, n):
+        if (k, n) not in self._orders:
+            o = list(range(len(self.pools[k][0])))
+            random.Random(self.seed * 1009 + k * 101 + n).shuffle(o)
+            self._orders[k, n] = o
+        return self._orders[k, n]
+
+    def _take(self, k, n, pos):
+        rows, want = self.pools[k]
+        take, seen, h = [], set(), 0.0
+        while h < want and len(take) < len(rows):
+            o = self._order(k, n)
+            if pos >= len(o):
+                n, pos = n + 1, 0
+                continue
+            i = o[pos]
+            pos += 1
+            if i in seen:
+                continue
+            take.append(i)
+            seen.add(i)
+            h += rows[i]["seconds"] / 3600
+        return take, n, pos
+
+    def epoch(self, ep):
+        e = max(x for x in self._state if x < ep)
+        while e < ep:
+            takes = [self._take(k, n, pos) for k, (n, pos) in enumerate(self._state[e])]
+            e += 1
+            self._state[e] = [(n, pos) for _, n, pos in takes]
+        return [self.pools[k][0][i] for k, (take, _, _) in enumerate(takes) for i in take]
+
+
+def make_batches(rows, max_seconds, max_bs, rng):
+    """Shuffle, sort windows of ~50 batches by length, fill batches up to max_seconds of PADDED audio (longest x count),
+    shuffle batch order. Bounds encoder activation memory independent of clip length."""
+    idx = list(range(len(rows)))
+    rng.shuffle(idx)
+    win = max_bs * 50
+    batches = []
+    for c in range(0, len(idx), win):
+        chunk = sorted(idx[c : c + win], key=lambda j: rows[j]["seconds"])
+        b = []
+        for j in chunk:
+            if b and (len(b) + 1) * rows[j]["seconds"] > max_seconds or len(b) == max_bs:
+                batches.append(b)
+                b = []
+            b.append(j)
+        if b:
+            batches.append(b)
+    rng.shuffle(batches)
+    return batches
+
+
+def decode(path):
+    """float32 mono 16 kHz (soundfile for wav/flac, ffmpeg otherwise; same as Embed2ASR inference)."""
+    from embed2asr.audio import load_audio
+
+    return load_audio(path)
+
+
+class BatchSet(torch.utils.data.Dataset):
+    """Item k = collated batch k: (mel [B,F,128] bf16, mel_mask [B,F], targets, target_lens, texts, langs)."""
+
+    def __init__(self, rows, batches, fe, encode):
+        self.rows, self.batches, self.fe, self.encode = rows, batches, fe, encode
+
+    def __len__(self):
+        return len(self.batches)
+
+    def __getitem__(self, k):
+        rs = [self.rows[j] for j in self.batches[k]]
+        wavs = [decode(r["audio"]) for r in rs]
+        inp = self.fe(wavs, sampling_rate=16000, return_tensors="pt")
+        tg = [self.encode(r["text"]) for r in rs]
+        return (
+            inp["input_features"].to(torch.bfloat16),
+            inp["input_features_mask"],
+            torch.tensor([t for x in tg for t in x], dtype=torch.long),
+            torch.tensor([len(x) for x in tg], dtype=torch.long),
+            [r["text"] for r in rs],
+            [r["lang"] for r in rs],
+        )
+
+
+def loader(rows, batches, fe, encode, workers=12, start=0):
+    ds = BatchSet(rows, batches[start:], fe, encode)
+    return torch.utils.data.DataLoader(
+        ds, batch_size=None, shuffle=False, num_workers=workers, prefetch_factor=4 if workers else None, persistent_workers=False
+    )
+
+
+def time_mask(x, lens, frac, gen):
+    """Zero ~frac of valid frames in spans of 4 (Embed2ASR-v1 augmentation on reader input)."""
+    if frac <= 0:
+        return x
+    B, T, _ = x.shape
+    n = (lens.float() * frac / 4).long()
+    keep = torch.ones(B, T)
+    for b in range(B):
+        if n[b] > 0:
+            s = torch.randint(0, max(1, int(lens[b]) - 4), (int(n[b]),), generator=gen)
+            for t in s.tolist():
+                keep[b, t : t + 4] = 0
+    return x * keep.to(x.device)[..., None]
+
