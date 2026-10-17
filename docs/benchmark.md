@@ -1,4 +1,30 @@
-# TingMix-Large benchmark (candidate 2026-10-17)
+# TingMix-Large benchmark
+
+Released model: [tc3oliver/TingMix-Large](https://huggingface.co/tc3oliver/TingMix-Large) (2026-10-17).
+
+## Released model (single test run)
+
+Fine-tuned from the earlier candidate below with the NTUML2021 **train** split added (official lecture-disjoint
+train/test split: 0 shared lectures; 2 train lectures held out as NTUML dev for selection). NTUML2021 test is therefore
+an in-domain test for this model. Decoder: character 5-gram LM (CV + Parliament + ASCEND + NTUML-train transcripts,
+all dev/test sentences removed), alpha 0.35, beta 1.5, beam 16.
+
+| Test set | Metric | Embed2ASR-v1 greedy | TingMix-Large (released) |
+|---|---|---|---|
+| Common Voice zh-TW 27.0 | CER | 15.62 | **12.26** |
+| Parliament A | CER | 19.17 | **17.41** |
+| Parliament B | CER | 19.31 | **17.86** |
+| ASCEND, mixed sentences | MER | 23.90 | **20.76** |
+| NTUML2021, mixed sentences (in-domain) | MER | 29.48 | **15.15** |
+| FLEURS en_us | WER | 24.52 | **19.88** |
+| LibriSpeech test-clean | WER | 8.99 | **7.89** |
+| LibriSpeech test-other | WER | 19.72 | **17.28** |
+| VoxPopuli en | WER | 15.31 | **13.61** |
+| AMI IHM | WER | 23.59 | **20.90** |
+
+## Earlier candidate (NTUML never seen)
+
+The numbers below are kept as the unseen-domain reference: NTUML2021 was not used for training, the LM or selection.
 
 One checkpoint, one test run. All model, decoder and LM-weight choices were made on development sets only; the test
 sets below were run once on the final candidate. Scoring is identical to the Embed2ASR v0.1.0 benchmark

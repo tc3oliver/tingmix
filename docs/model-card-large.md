@@ -1,7 +1,7 @@
-# TingMix-Large model card (DRAFT — not released)
+# TingMix-Large model card
 
-Status: draft. No TingMix-Large weights are published. Release needs the licence review below to be completed and
-explicitly approved by the maintainer; nothing is uploaded automatically.
+Released: [tc3oliver/TingMix-Large](https://huggingface.co/tc3oliver/TingMix-Large) (the Hugging Face card is the
+authoritative copy). The released version is additionally fine-tuned with the NTUML2021 train split.
 
 ## Model
 

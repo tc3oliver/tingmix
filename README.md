@@ -2,8 +2,8 @@
 
 Real-time speech recognition for **Taiwanese Mandarin, English and intra-sentence Mandarin-English code-switching**.
 
-Status: early development. No TingMix-Large weights are released yet; test numbers are published only after a single,
-pre-registered test run (see [Evaluation](#evaluation)). What works today:
+Status: TingMix-Large is released on Hugging Face ([tc3oliver/TingMix-Large](https://huggingface.co/tc3oliver/TingMix-Large));
+TingMix-Small is at the interface stage. What works today:
 
 - `tingmix transcribe | listen | serve` with Embed2ASR-v1 or a TingMix-Large training export, optional character
   n-gram LM decoding (`--lm`), WebSocket streaming with bearer-token auth;
@@ -26,19 +26,21 @@ TingMix depends on a pinned Embed2ASR release (one-way) and adapts it with encod
 top encoder layers, and reader improvements. The TingMix API does not assume EmbeddingGemma: a model is anything that
 implements `tingmix.models.base`.
 
-## Benchmark (TingMix-Large candidate, single test run)
+## Benchmark (TingMix-Large, single test run)
+
+Model: [huggingface.co/tc3oliver/TingMix-Large](https://huggingface.co/tc3oliver/TingMix-Large)
 
 | Test set | Metric | Embed2ASR-v1 | TingMix-Large |
 |---|---|---|---|
-| Common Voice zh-TW | CER | 15.62 | **12.48** |
-| Parliament A | CER | 19.17 | **17.35** |
-| ASCEND mixed | MER | 23.90 | **20.86** |
-| NTUML2021 mixed (evaluation only) | MER | 29.48 | **26.12** |
-| FLEURS en_us | WER | 24.52 | **19.71** |
-| LibriSpeech test-clean | WER | 8.99 | **7.91** |
+| Common Voice zh-TW | CER | 15.62 | **12.26** |
+| Parliament A | CER | 19.17 | **17.41** |
+| ASCEND mixed | MER | 23.90 | **20.76** |
+| NTUML2021 mixed (in-domain: train split used) | MER | 29.48 | **15.15** |
+| FLEURS en_us | WER | 24.52 | **19.88** |
+| LibriSpeech test-clean | WER | 8.99 | **7.89** |
 
-Embed2ASR-v1 = published greedy numbers; TingMix-Large uses its character LM. Full table, protocol and caveats:
-[docs/benchmark.md](docs/benchmark.md). Weights are not released yet (licence review pending).
+Embed2ASR-v1 = published greedy numbers; TingMix-Large uses its character LM. Full table, protocol, caveats and the
+earlier NTUML-unseen candidate: [docs/benchmark.md](docs/benchmark.md).
 
 ## Install
 
@@ -52,9 +54,10 @@ The EmbeddingGemma 2 encoder is downloaded from Hugging Face under Google's term
 ## Use
 
 ```bash
-tingmix transcribe meeting.wav --model large
-tingmix listen --model large                         # microphone, local model
-tingmix serve --model large --port 8765              # WebSocket server (binds 127.0.0.1)
+LM="--lm lm/lmCN_cv_parl_ascend_ntuml.charlm.json.gz --lm-alpha 0.35 --lm-beta 1.5"   # optional, recommended
+tingmix transcribe meeting.wav --model tc3oliver/TingMix-Large $LM
+tingmix listen --model tc3oliver/TingMix-Large $LM   # microphone, local model
+tingmix serve --model tc3oliver/TingMix-Large $LM --port 8765   # WebSocket server (binds 127.0.0.1)
 tingmix listen --server ws://127.0.0.1:8765          # e.g. a Mac microphone through an SSH tunnel to a GPU host
 ```
 
