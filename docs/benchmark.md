@@ -3,9 +3,9 @@
 One checkpoint, one test run. All model, decoder and LM-weight choices were made on development sets only; the test
 sets below were run once on the final candidate. Scoring is identical to the Embed2ASR v0.1.0 benchmark
 (`embed2asr.metrics.score` per language: CER for Mandarin rows, WER for English rows, MER for code-switched rows;
-rows whose reference contains digits are dropped), so the Embed2ASR-v1 columns are its published numbers. Both TingMix columns come from the same checkpoint (two
-decoders, each run once). Re-scoring
-Embed2ASR-v1's stored test outputs with `evaluation/accuracy.py`'s scorer reproduces them exactly.
+rows whose reference contains digits are dropped), so the Embed2ASR-v1 columns are its published numbers. Both TingMix
+columns come from the same checkpoint (two decoders, each run once). Re-scoring Embed2ASR-v1's stored test outputs with
+`evaluation/accuracy.py`'s scorer reproduces them exactly.
 
 ## Model
 
