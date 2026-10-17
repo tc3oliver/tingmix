@@ -223,7 +223,10 @@ def run(a):
         # copy out of DataLoader shared memory: resident batches must not pin shm segments / file descriptors
         dev_data[name] = (
             metric,
-            [tuple(x.clone() if torch.is_tensor(x) else x for x in b) for b in D.loader(rows, bs, None, tok.encode, a.workers, 0, "wave")],
+            [
+                tuple(torch.from_numpy(x) if isinstance(x, np.ndarray) else x for x in b)
+                for b in D.loader(rows, bs, None, tok.encode, a.workers, 0, "wave")
+            ],
         )
     print(f"dev audio ready in {time.time() - t0:.0f}s", flush=True)
 
@@ -285,6 +288,7 @@ def run(a):
         for k, (wav, lens, tg, tl, _, _) in enumerate(
             D.loader(rows, batches, None, tok.encode, a.workers, st["batch"], "wave"), st["batch"]
         ):
+            wav, lens, tg, tl = (torch.from_numpy(x) for x in (wav, lens, tg, tl))
             for g in opt.param_groups:
                 g["lr"] = lr_at()
             lp, fl = forward(net, wav.to(dev, non_blocking=True), lens, (a.time_masks, a.freq_masks, gen))

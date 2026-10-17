@@ -145,7 +145,16 @@ class BatchSet(torch.utils.data.Dataset):
                 except (OSError, ValueError) as e:
                     print(f"[data] cannot decode {r['audio']}: {e}; replaced by 0.5 s of zeros", flush=True)
                     ws.append(torch.zeros(8000))
-            x, m = torch.nn.utils.rnn.pad_sequence(ws, batch_first=True), torch.tensor([len(w) for w in ws])
+            x, m = torch.nn.utils.rnn.pad_sequence(ws, batch_first=True).numpy(), np.array([len(w) for w in ws])
+            tg = [self.encode(r["text"]) for r in rs]  # numpy through the worker pipe: no shared-memory segments at all
+            return (
+                x,
+                m,
+                np.array([t for y in tg for t in y], dtype=np.int64),
+                np.array([len(y) for y in tg]),
+                [r["text"] for r in rs],
+                [r["lang"] for r in rs],
+            )
         elif self.features == "cache":
             xs = [read_feat(r) for r in rs]
             x, m = torch.nn.utils.rnn.pad_sequence(xs, batch_first=True), torch.tensor([len(t) for t in xs])
@@ -171,9 +180,16 @@ class BatchSet(torch.utils.data.Dataset):
 
 def loader(rows, batches, fe, encode, workers=12, start=0, features="audio"):
     ds = BatchSet(rows, batches[start:], fe, encode, features)
+    extra = {"collate_fn": _as_is} if features == "wave" else {}  # keep numpy (default_convert would make shm tensors)
+    if workers:
+        extra["timeout"] = 600  # a dead worker raises instead of hanging forever -> supervisor restarts, trainer resumes
     return torch.utils.data.DataLoader(
-        ds, batch_size=None, shuffle=False, num_workers=workers, prefetch_factor=4 if workers else None, persistent_workers=False
+        ds, batch_size=None, shuffle=False, num_workers=workers, prefetch_factor=4 if workers else None, persistent_workers=False, **extra
     )
+
+
+def _as_is(b):
+    return b
 
 
 def time_mask(x, lens, frac, gen):
