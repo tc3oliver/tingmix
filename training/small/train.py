@@ -128,7 +128,6 @@ def run(a):
     from embed2asr.tokenizer import Tok
     from safetensors.torch import save_file
 
-    torch.multiprocessing.set_sharing_strategy("file_system")
     dev = torch.device(a.device)
     C.set_status(a.out, "RUNNING", "starting")
     vk = torch.load(a.vocab_from, map_location="cpu", weights_only=False)
@@ -215,7 +214,11 @@ def run(a):
     for name, (rows, metric) in devsets.items():
         order = sorted(range(len(rows)), key=lambda i: rows[i]["seconds"])
         bs = [order[i : i + 64] for i in range(0, len(order), 64)]
-        dev_data[name] = (metric, list(D.loader(rows, bs, None, tok.encode, a.workers, 0, "wave")))
+        # copy out of DataLoader shared memory: resident batches must not pin shm segments / file descriptors
+        dev_data[name] = (
+            metric,
+            [tuple(x.clone() if torch.is_tensor(x) else x for x in b) for b in D.loader(rows, bs, None, tok.encode, a.workers, 0, "wave")],
+        )
     print(f"dev audio ready in {time.time() - t0:.0f}s", flush=True)
 
     @torch.no_grad()

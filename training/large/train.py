@@ -133,8 +133,6 @@ def main(argv=None):
 
 
 def run(a):
-    # resident dev batches come from DataLoader workers; the default fd-passing strategy exhausts `ulimit -n`
-    torch.multiprocessing.set_sharing_strategy("file_system")
     from embed2asr.ctc import collapse_ctc, ctc_min_len
     from embed2asr.metrics import corpus
     from embed2asr.reader import Reader
@@ -299,7 +297,10 @@ def run(a):
     for name, (rows, metric) in devsets.items():
         order = sorted(range(len(rows)), key=lambda i: rows[i]["seconds"])
         bs = [order[i : i + 32] for i in range(0, len(order), 32)]
-        dev_mel[name] = (rows, metric, bs, list(D.loader(rows, bs, fe, tok.encode, a.workers, 0, a.features)))
+        batches = [
+            tuple(x.clone() if torch.is_tensor(x) else x for x in b) for b in D.loader(rows, bs, fe, tok.encode, a.workers, 0, a.features)
+        ]
+        dev_mel[name] = (rows, metric, bs, batches)  # cloned out of DataLoader shared memory (no pinned shm / fds)
     print(f"dev mel ready in {time.time() - t0:.0f}s: {', '.join(f'{k}={len(v[0])}' for k, v in dev_mel.items())}", flush=True)
 
     def forward_enc(x, m, mode):
