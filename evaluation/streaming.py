@@ -35,6 +35,23 @@ class Timed:
     def __init__(self, model):
         self.model, self.costs, self.offline = model, [], {}
         self.sample_rate, self.max_window_s = model.sample_rate, model.max_window_s
+        self.streaming_native = getattr(model, "streaming_native", False)
+
+    def new_stream(self):
+        """Native streaming models: time every accept()/finalize() call like a decode."""
+        stream, costs = self.model.new_stream(), self.costs
+
+        class TimedStream:
+            def accept(self, pcm):
+                t0 = time.perf_counter()
+                out = stream.accept(pcm)
+                costs.append(time.perf_counter() - t0)
+                return out
+
+            def finalize(self):
+                return stream.finalize()
+
+        return TimedStream()
 
     def transcribe_batch(self, wavs):
         t0 = time.perf_counter()
