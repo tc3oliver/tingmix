@@ -70,6 +70,7 @@ def parse(argv=None):
         p.set_defaults(**cfg)
     a = p.parse_args(argv)
     a.out = Path(a.out)
+    a._defaults = {x.dest: x.default for x in p._actions}
     return a
 
 
@@ -152,7 +153,8 @@ def run(a):
     for x in sorted(set(paths)):
         h.update(Path(x).read_bytes())
     data_hash = h.hexdigest()
-    cfg_now = json.loads(json.dumps({k: v for k, v in vars(a).items() if k not in MUTABLE}, default=str))
+    defaults = json.loads(json.dumps(a._defaults, default=str))
+    cfg_now = json.loads(json.dumps({k: v for k, v in vars(a).items() if k not in MUTABLE and k != "_defaults"}, default=str))
 
     torch.manual_seed(a.seed)
     net = SmallNet(len(tok.itos), a.d, a.hidden, a.layers, a.dropout).to(dev)
@@ -169,8 +171,12 @@ def run(a):
     if a.resume == "auto":
         r, rp = C.load_resume(a.out)
         if r is not None:
-            if r["config"] != cfg_now or r["data_hash"] != data_hash:
-                raise Permanent("cannot resume: config or data differ")
+            # options added after the run started are compatible when they keep their default value
+            diff = sorted(
+                k for k in set(r["config"]) | set(cfg_now) if r["config"].get(k, defaults.get(k)) != cfg_now.get(k, defaults.get(k))
+            )
+            if diff or r["data_hash"] != data_hash:
+                raise Permanent(f"cannot resume: config differs {diff} or data differs ({r['data_hash'] != data_hash})")
             net.load_state_dict(r["net"])
             opt.load_state_dict(r["opt"])
             st = r["state"]
