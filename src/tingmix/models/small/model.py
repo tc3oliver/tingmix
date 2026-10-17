@@ -80,8 +80,8 @@ class SmallNet(nn.Module):
 class Stream:
     """Incremental decoding of one utterance; output equals SmallNet.forward on the whole audio (greedy CTC)."""
 
-    def __init__(self, net: SmallNet, decode):
-        self.net, self.decode = net, decode
+    def __init__(self, net: SmallNet, decode, final=None):
+        self.net, self.decode, self.final = net, decode, final
         self.samples = torch.zeros(0)
         self.mel_buf = torch.zeros(0, N_MELS)
         self.state = None
@@ -112,4 +112,7 @@ class Stream:
         return self.decode(self.ids)
 
     def finalize(self) -> str:
+        """Final text: `final(log-probs)` (e.g. LM beam search) when given, else the greedy hypothesis."""
+        if self.final is not None and self.logp:
+            return self.final(torch.cat(self.logp))
         return self.decode(self.ids)

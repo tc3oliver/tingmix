@@ -66,7 +66,18 @@ def dump(a):
 
     from tingmix.core.registry import load_model
 
-    asr = load_model(a.model, device=a.device).asr
+    model = load_model(a.model, device=a.device)
+    asr = getattr(model, "asr", None)  # Large: Embed2ASR pipeline; Small: SmallModel (net + tok)
+    tok = asr.tok if asr is not None else model.tok
+
+    def logprobs(wav):
+        if asr is not None:
+            feats, lens = asr.encoder([wav])
+            return asr.reader(feats.to(asr.device).float(), lens).float().log_softmax(-1)[0, : int(lens[0])].cpu()
+        x = torch.from_numpy(wav)[None].to(model.device)
+        lp, fl = model.net(x, torch.tensor([len(wav)]))
+        return lp[0, : int(fl[0])].float().cpu()
+
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     for spec in a.set:
@@ -74,16 +85,15 @@ def dump(a):
         lps, meta = [], []
         with torch.inference_mode():
             for r in rows:
-                feats, lens = asr.encoder([load_audio(r["audio"])])
-                lp = asr.reader(feats.to(asr.device).float(), lens).float().log_softmax(-1)[0, : int(lens[0])].cpu()
+                lp = logprobs(load_audio(r["audio"]))
                 v, i = lp.topk(a.topk, -1)
                 lps.append((v.half().numpy(), i.short().numpy()))
                 meta.append({"text": r["text"], "lang": r.get("lang")})
         np.savez(out / f"{name}.npz", **{f"v{k}": v for k, (v, _) in enumerate(lps)}, **{f"i{k}": i for k, (_, i) in enumerate(lps)})
         (out / f"{name}.json").write_text(json.dumps({"metric": metric, "rows": meta}, ensure_ascii=False))
         print(f"{name}: {len(rows)} utterances", flush=True)
-    sp = asr.tok.sp_bytes or b""
-    (out / "tok.json").write_text(json.dumps({"itos": asr.tok.itos}, ensure_ascii=False))
+    sp = tok.sp_bytes or b""
+    (out / "tok.json").write_text(json.dumps({"itos": tok.itos}, ensure_ascii=False))
     (out / "tok.sp").write_bytes(sp)
 
 

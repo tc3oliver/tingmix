@@ -21,6 +21,9 @@ def main(argv=None):
     p.add_argument("--chunk-ms", type=int, default=100)
     p.add_argument("--n", type=int, default=50, help="utterances per manifest (evenly spaced)")
     p.add_argument("--out")
+    p.add_argument("--lm", help="character LM for final texts (Small: partials greedy, finals beam search)")
+    p.add_argument("--lm-alpha", type=float, default=0.35)
+    p.add_argument("--lm-beta", type=float, default=1.5)
     a = p.parse_args(argv)
 
     import numpy as np
@@ -31,7 +34,7 @@ def main(argv=None):
     torch.set_num_threads(a.threads)
     from tingmix.core.registry import load_model
 
-    model = load_model(a.model, device="cpu")
+    model = load_model(a.model, device="cpu", **({"lm": a.lm, "lm_alpha": a.lm_alpha, "lm_beta": a.lm_beta} if a.lm else {}))
     model.transcribe_batch([np.zeros(16000, np.float32)])  # warm-up
     chunk = 16000 * a.chunk_ms // 1000
     lat, comp, audio, rows = [], 0.0, 0.0, []
@@ -47,7 +50,9 @@ def main(argv=None):
                 dt = time.perf_counter() - t0
                 lat.append(dt * 1000)
                 comp += dt
-            text = s.finalize()
+            t0 = time.perf_counter()
+            text = s.finalize()  # final decode (LM beam search when configured) counts as compute too
+            comp += time.perf_counter() - t0
             audio += len(wav) / 16000
             rows.append({"ref": r["text"], "hyp": text, "lang": r.get("lang")})
     q = np.percentile(lat, [50, 95, 100])

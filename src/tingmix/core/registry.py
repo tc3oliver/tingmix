@@ -16,8 +16,8 @@ def _large(path: str | None = None, **kw):
 def _small(path: str | None = None, **kw):
     from ..models.small import SmallModel
 
-    kw.pop("lm", None), kw.pop("lm_alpha", None), kw.pop("lm_beta", None)  # Small decodes greedily
-    return SmallModel.from_pretrained(*([path] if path else []), **{k: v for k, v in kw.items() if k in ("device", "threads")})
+    keep = ("device", "threads", "lm", "lm_alpha", "lm_beta", "beam")
+    return SmallModel.from_pretrained(*([path] if path else []), **{k: v for k, v in kw.items() if k in keep})
 
 
 MODELS = {"large": _large, "embed2asr-v1": _large, "small": _small}

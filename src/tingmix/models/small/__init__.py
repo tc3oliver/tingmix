@@ -19,12 +19,15 @@ class SmallModel:
     max_window_s = float("inf")
     streaming_native = True
 
-    def __init__(self, net, tok, device="cpu"):
+    def __init__(self, net, tok, device="cpu", lm=None):
         device = device or "cpu"
         self.net, self.tok, self.device = net.eval().to(device), tok, device
+        self.lm = lm  # (CharLM, alpha, beta, beam): final texts use CTC prefix beam search with the LM; partials stay greedy
 
     @classmethod
-    def from_pretrained(cls, path_or_repo: str = DEFAULT_REPO, device: str = "cpu", threads: int | None = None):
+    def from_pretrained(
+        cls, path_or_repo: str = DEFAULT_REPO, device: str = "cpu", threads: int | None = None, lm=None, lm_alpha=0.35, lm_beta=1.5, beam=16
+    ):
         import torch
         from embed2asr.tokenizer import Tok
         from safetensors.torch import load_file
@@ -43,7 +46,24 @@ class SmallModel:
         sp = (path / "tokenizer_bpe.model").read_bytes() if (path / "tokenizer_bpe.model").exists() else None
         net = SmallNet(**cfg)
         net.load_state_dict(load_file(str(path / "model.safetensors")))
-        return cls(net, Tok(itos, sp), device)
+        lm_args = None
+        if lm:
+            from embed2asr.lm import CharLM
+
+            lm_path = Path(lm) if Path(lm).is_file() else path / lm
+            lm_args = (CharLM.load(lm_path), lm_alpha, lm_beta, beam)
+        return cls(net, Tok(itos, sp), device, lm_args)
+
+    def _final(self, logp) -> str:
+        """Final text from per-frame log-probs [T, V]: LM beam search if an LM is set, else greedy."""
+        if self.lm is None or len(logp) == 0:
+            return self._decode(logp.argmax(-1).tolist())
+        from embed2asr.lm import beam_decode, lm_units
+
+        lm, alpha, beta, beam = self.lm
+        if not hasattr(self, "_units"):
+            self._units = lm_units(self.tok.itos)
+        return beam_decode(logp.float().cpu().numpy(), self.tok, lm, alpha, beta, beam, units=self._units)
 
     def _decode(self, ids):
         from embed2asr.ctc import collapse_ctc
@@ -59,9 +79,9 @@ class SmallModel:
         x = torch.nn.utils.rnn.pad_sequence([torch.as_tensor(w, dtype=torch.float32) for w in wavs], batch_first=True).to(self.device)
         with torch.inference_mode():
             lp, fl = self.net(x, lens)
-        return [self._decode(row[:n].argmax(-1).tolist()) for row, n in zip(lp, fl.tolist())]
+        return [self._final(row[:n]) for row, n in zip(lp, fl.tolist())]
 
     def new_stream(self):
         from .model import Stream
 
-        return Stream(self.net, self._decode)
+        return Stream(self.net, self._decode, self._final)
