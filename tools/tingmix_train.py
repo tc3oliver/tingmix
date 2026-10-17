@@ -189,6 +189,8 @@ def docker_create(exp, cfg, job, sha, allow_code_change=False):
         f"{uid}:{gid}",
         "--ipc=host",
         "--shm-size=32g",
+        "--ulimit",
+        "nofile=1048576:1048576",
         "--memory",
         str(job.get("memory", "96g")),
         "--cpus",
