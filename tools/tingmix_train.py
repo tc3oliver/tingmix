@@ -386,6 +386,9 @@ def reconcile(a):
             if st.get("state") == "DONE" or (st.get("state") == "FAILED" and st.get("permanent")):
                 j["desired"] = st["state"].lower()
                 continue
+            if not st and cs and cs["status"] == "exited" and cs["exit"] == 0:  # trainers without status.json: exit 0 = finished
+                j["desired"] = "done"
+                continue
             if j["reconcile_restarts"] >= MAX_RECONCILE_RESTARTS:
                 j["desired"] = "failed"
                 j["note"] = "reconcile restart budget exhausted; inspect logs, then `tingmix-train resume --force`"

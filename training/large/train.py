@@ -133,6 +133,8 @@ def main(argv=None):
 
 
 def run(a):
+    # resident dev batches come from DataLoader workers; the default fd-passing strategy exhausts `ulimit -n`
+    torch.multiprocessing.set_sharing_strategy("file_system")
     from embed2asr.ctc import collapse_ctc, ctc_min_len
     from embed2asr.metrics import corpus
     from embed2asr.reader import Reader
