@@ -42,7 +42,7 @@ class StreamingSession:
         self.stability = StablePrefix(stability_k)
         self.transcript = Transcript()
         self._frame = int(self.vad.frame_ms * self.sr / 1000)
-        self._buf = RingBuffer(int((model.max_window_s + 30) * self.sr))
+        self._buf = RingBuffer(int((min(model.max_window_s, max_segment_s) + 30) * self.sr))
         self._rem = np.zeros(0, dtype=np.float32)  # samples of an incomplete VAD frame
         self._pos = 0  # samples processed (whole frames)
         self._prev_end = 0  # end of the last closed segment
@@ -82,10 +82,18 @@ class StreamingSession:
         self._seg_id += 1
         self.scheduler.reset()
         self.stability.reset()
+        if getattr(self.model, "streaming_native", False):  # stateful model: one stream per segment, audio fed once
+            self._stream, self._fed = self.model.new_stream(), self._seg_start
 
     def _decode(self, a: int, b: int) -> str:
         t0 = time.perf_counter()
-        text = self.model.transcribe_batch([self._buf.get(a, b)])[0].strip() if b - a >= self.sr // 10 else ""
+        if getattr(self.model, "streaming_native", False):
+            if b > self._fed:  # only the new audio is processed; the model keeps its state
+                text, self._fed = self._stream.accept(self._buf.get(self._fed, b)).strip(), b
+            else:
+                text = self._stream.finalize().strip()
+        else:
+            text = self.model.transcribe_batch([self._buf.get(a, b)])[0].strip() if b - a >= self.sr // 10 else ""
         self.scheduler.mark(b - a, time.perf_counter() - t0)
         self._last = (a, b, text)
         return text

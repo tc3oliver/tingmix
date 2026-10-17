@@ -131,7 +131,16 @@ class BatchSet(torch.utils.data.Dataset):
     def __getitem__(self, k):
         rs = [self.rows[j] for j in self.batches[k]]
         tg = [self.encode(r["text"]) for r in rs]
-        if self.features == "cache":
+        if self.features == "wave":  # raw padded waveforms + sample lengths (models with their own front end)
+            ws = []
+            for r in rs:
+                try:
+                    ws.append(torch.from_numpy(decode(r["audio"])))
+                except (OSError, ValueError) as e:
+                    print(f"[data] cannot decode {r['audio']}: {e}; replaced by 0.5 s of zeros", flush=True)
+                    ws.append(torch.zeros(8000))
+            x, m = torch.nn.utils.rnn.pad_sequence(ws, batch_first=True), torch.tensor([len(w) for w in ws])
+        elif self.features == "cache":
             xs = [read_feat(r) for r in rs]
             x, m = torch.nn.utils.rnn.pad_sequence(xs, batch_first=True), torch.tensor([len(t) for t in xs])
         else:
