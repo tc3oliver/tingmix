@@ -26,6 +26,20 @@ TingMix depends on a pinned Embed2ASR release (one-way) and adapts it with encod
 top encoder layers, and reader improvements. The TingMix API does not assume EmbeddingGemma: a model is anything that
 implements `tingmix.models.base`.
 
+## Benchmark (TingMix-Large candidate, single test run)
+
+| Test set | Metric | Embed2ASR-v1 | TingMix-Large |
+|---|---|---|---|
+| Common Voice zh-TW | CER | 15.62 | **12.48** |
+| Parliament A | CER | 19.17 | **17.35** |
+| ASCEND mixed | MER | 23.90 | **20.86** |
+| NTUML2021 mixed (evaluation only) | MER | 29.48 | **26.12** |
+| FLEURS en_us | WER | 24.52 | **19.71** |
+| LibriSpeech test-clean | WER | 8.99 | **7.91** |
+
+Embed2ASR-v1 = published greedy numbers; TingMix-Large uses its character LM. Full table, protocol and caveats:
+[docs/benchmark.md](docs/benchmark.md). Weights are not released yet (licence review pending).
+
 ## Install
 
 ```bash
