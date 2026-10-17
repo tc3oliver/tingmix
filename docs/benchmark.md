@@ -22,6 +22,11 @@ all dev/test sentences removed), alpha 0.35, beta 1.5, beam 16.
 | VoxPopuli en | WER | 15.31 | **13.61** |
 | AMI IHM | WER | 23.59 | **20.90** |
 
+Streaming (released model, buffered re-decoding, 50 dev clips per set + a 61.7 s concatenated stream): final MER/CER
+stream vs offline — Common Voice 10.24 vs 10.51, ASCEND mixed 19.40 vs 18.81, NTUML dev mixed 14.72 vs 17.34; per-update
+compute p50 55 ms / p95 73 ms on one MI300X; first partial p50 0.55 s; final 0.71 s (p50) after the segment ends;
+13/13 segments found in the concatenated stream.
+
 ## Earlier candidate (NTUML never seen)
 
 The numbers below are kept as the unseen-domain reference: NTUML2021 was not used for training, the LM or selection.
