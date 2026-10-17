@@ -50,6 +50,8 @@ def parse(argv=None):
     p.add_argument("--max-bs", type=int, default=128)
     p.add_argument("--time-masks", type=int, default=6, help="SpecAugment: time masks per utterance (width <= 10 frames)")
     p.add_argument("--freq-masks", type=int, default=2, help="SpecAugment: frequency masks (width <= 15 bins)")
+    p.add_argument("--short-first-steps", type=int, default=0, help="curriculum: until this step only train on short clips")
+    p.add_argument("--short-max-s", type=float, default=5.0)
     p.add_argument("--eval-every", type=int, default=2000)
     p.add_argument("--save-every-min", type=float, default=15.0)
     p.add_argument("--workers", type=int, default=16)
@@ -268,6 +270,8 @@ def run(a):
     agg = {"loss": 0.0, "n": 0, "audio_s": 0.0, "t0": time.time()}
     while st["train_s"] < budget:
         rows = sampler.epoch(st["epoch"])
+        if st["step"] < a.short_first_steps:  # SortaGrad-style curriculum: alignments are learnt on short clips first
+            rows = [r for r in rows if r["seconds"] <= a.short_max_s]
         batches = D.make_batches(rows, a.max_seconds, a.max_bs, random.Random(a.seed * 7919 + st["epoch"]))
         for k, (wav, lens, tg, tl, _, _) in enumerate(
             D.loader(rows, batches, None, tok.encode, a.workers, st["batch"], "wave"), st["batch"]
