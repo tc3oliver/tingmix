@@ -23,7 +23,7 @@ MODELS = {"large": _large, "embed2asr-v1": _large, "small": _small}
 
 
 def load_model(name: str = "large", **kw):
-    if name.endswith(".pt") or os.path.isdir(name):  # training export or embed2asr release directory
+    if name.endswith(".pt") or os.path.isdir(name) or "/" in name:  # training export, release directory or HF repo id
         return _large(name, **kw)
     if name not in MODELS:
         raise ValueError(f"unknown model {name!r}; available: {sorted(MODELS)}")
