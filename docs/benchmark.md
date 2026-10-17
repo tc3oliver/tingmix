@@ -3,7 +3,8 @@
 One checkpoint, one test run. All model, decoder and LM-weight choices were made on development sets only; the test
 sets below were run once on the final candidate. Scoring is identical to the Embed2ASR v0.1.0 benchmark
 (`embed2asr.metrics.score` per language: CER for Mandarin rows, WER for English rows, MER for code-switched rows;
-rows whose reference contains digits are dropped), so the Embed2ASR-v1 columns are its published numbers. Re-scoring
+rows whose reference contains digits are dropped), so the Embed2ASR-v1 columns are its published numbers. Both TingMix columns come from the same checkpoint (two
+decoders, each run once). Re-scoring
 Embed2ASR-v1's stored test outputs with `evaluation/accuracy.py`'s scorer reproduces them exactly.
 
 ## Model
@@ -18,18 +19,18 @@ Embed2ASR-v1's stored test outputs with `evaluation/accuracy.py`'s scorer reprod
 
 ## Results (error rates in %, lower is better)
 
-| Test set | Metric | Embed2ASR-v1 greedy | Embed2ASR-v1 + LM | TingMix-Large + LM |
-|---|---|---|---|---|
-| Common Voice zh-TW 27.0 | CER | 15.62 | 14.72 | **12.48** |
-| Parliament A | CER | 19.17 | 19.01 | **17.35** |
-| Parliament B | CER | 19.31 | 19.22 | **17.79** |
-| ASCEND, mixed sentences | MER | 23.90 | 22.93 | **20.86** |
-| NTUML2021, mixed sentences (evaluation only) | MER | 29.48 | 28.92 | **26.12** |
-| FLEURS en_us | WER | 24.52 | – | **19.71** |
-| LibriSpeech test-clean | WER | 8.99 | – | **7.91** |
-| LibriSpeech test-other | WER | 19.72 | – | **17.38** |
-| VoxPopuli en | WER | 15.31 | – | **13.69** |
-| AMI IHM | WER | 23.59 | – | **21.05** |
+| Test set | Metric | Embed2ASR-v1 greedy | Embed2ASR-v1 + LM | TingMix-Large greedy | TingMix-Large + LM |
+|---|---|---|---|---|---|
+| Common Voice zh-TW 27.0 | CER | 15.62 | 14.72 | 14.39 | **12.48** |
+| Parliament A | CER | 19.17 | 19.01 | 18.49 | **17.35** |
+| Parliament B | CER | 19.31 | 19.22 | 19.04 | **17.79** |
+| ASCEND, mixed sentences | MER | 23.90 | 22.93 | 22.21 | **20.86** |
+| NTUML2021, mixed sentences (evaluation only) | MER | 29.48 | 28.92 | 28.21 | **26.12** |
+| FLEURS en_us | WER | 24.52 | – | 20.06 | **19.71** |
+| LibriSpeech test-clean | WER | 8.99 | – | 8.03 | **7.91** |
+| LibriSpeech test-other | WER | 19.72 | – | 17.53 | **17.38** |
+| VoxPopuli en | WER | 15.31 | – | 13.97 | **13.69** |
+| AMI IHM | WER | 23.59 | – | 21.37 | **21.05** |
 
 Reproduce: `python -m evaluation.accuracy --model <release dir> --lm <lm> --lm-alpha 0.35 --lm-beta 1.5 --by-lang
 --set NAME=MANIFEST:METRIC:nd ...` (manifests are not distributed; see docs/training.md for the expected format).
