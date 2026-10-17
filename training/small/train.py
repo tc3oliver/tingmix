@@ -135,7 +135,8 @@ def run(a):
     for spec in a.train:
         parts = spec.split(":")
         rows = D.load_rows(parts[0], nodigit=len(parts) > 2 and parts[2] == "nd")
-        rows = [r for r in rows if 0 < ctc_min_len(tok.encode(r["text"])) <= r["frames"]]
+        # feasibility on this model's real frame count (causal STFT span 512, hop 160, then /4), not the 25 fps estimate
+        rows = [r for r in rows if 0 < ctc_min_len(tok.encode(r["text"])) <= max(0, (round(r["seconds"] * 16000) - 512) // 160 + 1) // 4]
         print(f"pool {parts[0]}: {len(rows)} rows, {parts[1]} h/epoch", flush=True)
         pools.append((rows, float(parts[1])))
         paths.append(parts[0])
@@ -276,8 +277,12 @@ def run(a):
             lp, fl = forward(net, wav.to(dev, non_blocking=True), lens, (a.time_masks, a.freq_masks, gen))
             per = F.ctc_loss(lp.transpose(0, 1), tg.to(dev), fl, tl.to(dev), blank=0, reduction="none", zero_infinity=False)
             fin = torch.isfinite(per)
-            if not bool(fin.any()):
-                raise Permanent(f"all CTC losses non-finite at step {st['step']}")
+            if not bool(fin.any()):  # whole batch unalignable: skip it (permanent only if it keeps happening)
+                st["skipped"] = st.get("skipped", 0) + 1
+                if st["skipped"] > 100:
+                    raise Permanent(f"more than 100 batches with all CTC losses non-finite (step {st['step']})")
+                st["batch"] = k + 1
+                continue
             loss = (per / tl.to(dev).clamp(min=1))[fin].mean()
             opt.zero_grad(set_to_none=True)
             loss.backward()
