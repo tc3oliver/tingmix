@@ -104,11 +104,17 @@ def make_batches(rows, max_seconds, max_bs, rng):
     return batches
 
 
-def decode(path):
-    """float32 mono 16 kHz (soundfile for wav/flac, ffmpeg otherwise; same as Embed2ASR inference)."""
+def decode(path, seconds=None):
+    """float32 mono 16 kHz (ffmpeg / soundfile; same as Embed2ASR inference). With `seconds` (manifest duration) the
+    result is capped at seconds + 1 s: a file much longer than its manifest row is reported and truncated instead of
+    producing a huge batch."""
     from embed2asr.audio import load_audio
 
-    return load_audio(path)
+    x = load_audio(path)
+    if seconds is not None and len(x) > (seconds + 1.0) * 16000:
+        print(f"[data] {path}: decoded {len(x) / 16000:.1f} s but manifest says {seconds:.1f} s; truncated", flush=True)
+        x = x[: int((seconds + 1.0) * 16000)]
+    return x
 
 
 def read_feat(r):
@@ -135,7 +141,7 @@ class BatchSet(torch.utils.data.Dataset):
             ws = []
             for r in rs:
                 try:
-                    ws.append(torch.from_numpy(decode(r["audio"])))
+                    ws.append(torch.from_numpy(decode(r["audio"], r["seconds"])))
                 except (OSError, ValueError) as e:
                     print(f"[data] cannot decode {r['audio']}: {e}; replaced by 0.5 s of zeros", flush=True)
                     ws.append(torch.zeros(8000))
@@ -147,7 +153,7 @@ class BatchSet(torch.utils.data.Dataset):
             wavs = []
             for r in rs:
                 try:
-                    wavs.append(decode(r["audio"]))
+                    wavs.append(decode(r["audio"], r["seconds"]))
                 except (OSError, ValueError) as e:  # unreadable file: keep the batch shape;
                     print(f"[data] cannot decode {r['audio']}: {e}; replaced by 0.5 s of zeros", flush=True)
                     wavs.append(np.zeros(8000, np.float32))  # rare (audited); short labels may still train on it
