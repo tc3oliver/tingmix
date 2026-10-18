@@ -46,7 +46,8 @@ class LargeModel:
 
     @classmethod
     def from_checkpoint(
-        cls, path: str, device: str | None = None, lm: str | None = None, lm_alpha: float = 0.25, lm_beta: float = 1.5, beam: int = 16
+        cls, path: str, device: str | None = None, lm: str | None = None, lm_alpha: float = 0.25, lm_beta: float = 1.5, beam: int = 16,
+        att_weight: float = 0.0, att_mu: float = 0.0, nbest: int = 8,
     ) -> LargeModel:
         """Load a TingMix-Large training export (.pt): reader, tokenizer and encoder delta (trusted file: unpickled).
         `lm`: Embed2ASR character n-gram LM file -> CTC prefix beam search (CJK units scored; English pieces LM-neutral)."""
@@ -72,7 +73,21 @@ class LargeModel:
             from embed2asr.lm import CharLM
 
             lm_args = (CharLM.load(lm), lm_alpha, lm_beta, beam)
-        return cls(Embed2ASR(reader, Tok(ck["itos"], sp), encoder, config, device, lm=lm_args))
+        asr = Embed2ASR(reader, Tok(ck["itos"], sp), encoder, config, device, lm=lm_args)
+        if "att" in ck and att_weight:  # joint CTC/attention: the decoder rescores the CTC(+LM) beam's N-best
+            from .attention import AttDecoder, rescoring_decoder
+
+            cfg = dict(ck["att_cfg"])
+            if cfg.pop("mem") != "reader":
+                raise ValueError("inference supports decoders over Reader states only")
+            dec = AttDecoder(**cfg)
+            dec.load_state_dict(ck["att"])
+            dec.to(device).eval()
+            box = {}
+            reader.out.register_forward_hook(lambda mod, inp, out: box.__setitem__("h", inp[0]))  # __setitem__ returns None
+            a, b = (lm_args[1], lm_args[2]) if lm_args else (0.0, 0.0)
+            asr.decode = rescoring_decoder(dec, box, lm_args[0] if lm_args else None, a, b, beam, nbest, att_weight, att_mu)
+        return cls(asr)
 
     def transcribe_batch(self, wavs: list[np.ndarray]) -> list[str]:
         if not wavs:

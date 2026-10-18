@@ -20,6 +20,8 @@ from pathlib import Path
 
 import numpy as np
 
+from tingmix.models.large.attention import ZeroLM, beam_nbest
+
 PROMPT = "以下是一段語音的逐字稿（台灣華語、英文或中英夾雜）：\n"
 _G = {}
 
@@ -31,68 +33,8 @@ def _init(logits, lm_path):
     d = Path(logits)
     itos = json.loads((d / "tok.json").read_text())["itos"]
     _G["tok"] = Tok(itos, (d / "tok.sp").read_bytes() or None)
-    _G["units"], _G["lm"], _G["V"] = lm_units(itos), CharLM.load(lm_path), len(itos)
+    _G["units"], _G["lm"], _G["V"] = lm_units(itos), CharLM.load(lm_path) if lm_path else ZeroLM(), len(itos)
 
-
-def beam_nbest(lp, tok, lm, alpha, beta, beam, n, units, topk=8):
-    """embed2asr.lm.beam_decode, returning the n best (text, score) instead of the best text."""
-    from embed2asr.lm import EOS, NEG, PH, lse
-
-    st = {(): ("", 0.0, 0)}
-
-    def state(pf):
-        v = st.get(pf)
-        if v is None:
-            ctx, s, k = state(pf[:-1])
-            u = units[pf[-1]]
-            if u is None:
-                if not ctx.endswith(PH):
-                    s += lm.logp(ctx, PH)
-                    ctx += PH
-                v = (ctx, s, k)
-            else:
-                for ch in u:
-                    s += lm.logp(ctx, ch)
-                    ctx += ch
-                v = (ctx, s, k + len(u))
-            st[pf] = v
-        return v
-
-    def score(pf, pb, pnb):
-        _, s, k = state(pf)
-        return lse(pb, pnb) + alpha * s + beta * k
-
-    beams = {(): (0.0, NEG)}
-    for t in range(lp.shape[0]):
-        row = lp[t]
-        cand = np.argpartition(-row, topk)[:topk] if row.shape[0] > topk else range(row.shape[0])
-        cand = [int(c) for c in cand if row[c] > -14 or c == 0]
-        new = collections.defaultdict(lambda: [NEG, NEG])
-        for pf, (pb, pnb) in beams.items():
-            tot = lse(pb, pnb)
-            for c in cand:
-                p = float(row[c])
-                if c == 0:
-                    e = new[pf]
-                    e[0] = lse(e[0], tot + p)
-                    continue
-                if pf and c == pf[-1]:
-                    e = new[pf + (c,)]
-                    e[1] = lse(e[1], pb + p)
-                    e = new[pf]
-                    e[1] = lse(e[1], pnb + p)
-                else:
-                    e = new[pf + (c,)]
-                    e[1] = lse(e[1], tot + p)
-        beams = dict(sorted(((k, tuple(v)) for k, v in new.items()), key=lambda kv: -score(kv[0], *kv[1]))[:beam])
-    fin = sorted(((score(k, *v) + alpha * lm.logp(state(k)[0], EOS), k) for k, v in beams.items()), reverse=True)[:n]
-    out, seen = [], set()
-    for s, k in fin:
-        txt = tok.decode(k).replace("臺", "台")
-        if txt not in seen:
-            seen.add(txt)
-            out.append({"text": txt, "beam": s, "units": len(k)})
-    return out
 
 
 def _job(job):
@@ -171,12 +113,12 @@ def tune(a):
     best = None
     for lam in a.lam:
         for mu in a.mu:
-            pick = lambda nb, ref, lam=lam, mu=mu: max(nb, key=lambda h: h["beam"] + lam * h["llm"] + mu * h["units"])["text"]  # noqa: E731
+            pick = lambda nb, ref, lam=lam, mu=mu: max(nb, key=lambda h: h["beam"] + lam * h[a.field] + mu * h["units"])["text"]  # noqa: E731
             r = _rate(data, pick, 0)
             if best is None or tot(r) < tot(best[2]):
                 best = (lam, mu, r)
     lam, mu, r = best
-    pick = lambda nb, ref: max(nb, key=lambda h: h["beam"] + lam * h["llm"] + mu * h["units"])["text"]  # noqa: E731
+    pick = lambda nb, ref: max(nb, key=lambda h: h["beam"] + lam * h[a.field] + mu * h["units"])["text"]  # noqa: E731
     print("best lam", lam, "mu", mu, "tune", {k: round(v, 4) for k, v in r.items()})
     print("held-out", {k: round(v, 4) for k, v in _rate(data, pick, 1).items()})
 
@@ -186,7 +128,7 @@ def main(argv=None):
     s = p.add_subparsers(dest="cmd", required=True)
     n = s.add_parser("nbest")
     n.add_argument("--logits", required=True)
-    n.add_argument("--lm", required=True)
+    n.add_argument("--lm", help="char LM file (omit: no LM)")
     n.add_argument("--alpha", type=float, default=0.35)
     n.add_argument("--beta", type=float, default=1.5)
     n.add_argument("--beam", type=int, default=16)
@@ -201,6 +143,7 @@ def main(argv=None):
     c.add_argument("--out", required=True)
     t = s.add_parser("tune")
     t.add_argument("--scored", required=True)
+    t.add_argument("--field", default="llm", help="per-hypothesis score to combine (llm | att)")
     t.add_argument("--lam", nargs="+", type=float, default=[0.0, 0.1, 0.2, 0.3, 0.5, 0.7, 1.0])
     t.add_argument("--mu", nargs="+", type=float, default=[0.0, 0.5, 1.0, 2.0])
     a = p.parse_args(argv)

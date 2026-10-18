@@ -76,3 +76,15 @@ def test_event_json_round_trip():
     for ev in (PartialEvent(1, 2, "你好", 0.0, 1.5, 1), FinalEvent(1, 3, "你好", 0.0, 1.5)):
         assert event_from_dict(ev.to_dict()) == ev
     assert PartialEvent(0, 0, "x", 0, 1).to_dict()["type"] == "partial"
+
+
+def test_vad_ignores_steady_noise():
+    rng = np.random.default_rng(0)
+    v = EnergyVAD()
+    noise = lambda s, db: (rng.standard_normal(int(16000 * s)) * 10 ** (db / 20)).astype(np.float32)  # noqa: E731
+    fr = 320
+    hum = noise(8.0, -40)  # steady room noise well above the fixed -50 dB threshold: adapted to within a few seconds
+    states = [v.update(hum[i : i + fr]) for i in range(0, len(hum) - fr + 1, fr)]
+    assert not any(states[-100:])
+    speech = noise(0.5, -20)
+    assert any(v.update(speech[i : i + fr]) for i in range(0, len(speech) - fr + 1, fr))

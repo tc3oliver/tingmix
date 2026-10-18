@@ -6,8 +6,10 @@ Tokens = the CTC vocabulary (CJK characters + English BPE pieces) with blank (id
 
 from __future__ import annotations
 
+import collections
 import math
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -70,6 +72,94 @@ class AttDecoder(nn.Module):
         logits = self(mem[None].expand(n, -1, -1), torch.full((n,), int(mem_len)), ys_in, L).float().log_softmax(-1)
         lp = logits.gather(-1, ys_out.clamp(min=0)[..., None])[..., 0] * (ys_out != -100)
         return lp.sum(1).tolist()
+
+
+class ZeroLM:
+    """No n-gram LM: plain CTC prefix beam search (use alpha 0, beta 0)."""
+
+    def logp(self, prefix, w):
+        return 0.0
+
+
+def beam_nbest(lp, tok, lm, alpha, beta, beam, n, units, topk=8):
+    """embed2asr.lm.beam_decode, returning the n best (text, score) instead of the best text."""
+    from embed2asr.lm import EOS, NEG, PH, lse
+
+    st = {(): ("", 0.0, 0)}
+
+    def state(pf):
+        v = st.get(pf)
+        if v is None:
+            ctx, s, k = state(pf[:-1])
+            u = units[pf[-1]]
+            if u is None:
+                if not ctx.endswith(PH):
+                    s += lm.logp(ctx, PH)
+                    ctx += PH
+                v = (ctx, s, k)
+            else:
+                for ch in u:
+                    s += lm.logp(ctx, ch)
+                    ctx += ch
+                v = (ctx, s, k + len(u))
+            st[pf] = v
+        return v
+
+    def score(pf, pb, pnb):
+        _, s, k = state(pf)
+        return lse(pb, pnb) + alpha * s + beta * k
+
+    beams = {(): (0.0, NEG)}
+    for t in range(lp.shape[0]):
+        row = lp[t]
+        cand = np.argpartition(-row, topk)[:topk] if row.shape[0] > topk else range(row.shape[0])
+        cand = [int(c) for c in cand if row[c] > -14 or c == 0]
+        new = collections.defaultdict(lambda: [NEG, NEG])
+        for pf, (pb, pnb) in beams.items():
+            tot = lse(pb, pnb)
+            for c in cand:
+                p = float(row[c])
+                if c == 0:
+                    e = new[pf]
+                    e[0] = lse(e[0], tot + p)
+                    continue
+                if pf and c == pf[-1]:
+                    e = new[pf + (c,)]
+                    e[1] = lse(e[1], pb + p)
+                    e = new[pf]
+                    e[1] = lse(e[1], pnb + p)
+                else:
+                    e = new[pf + (c,)]
+                    e[1] = lse(e[1], tot + p)
+        beams = dict(sorted(((k, tuple(v)) for k, v in new.items()), key=lambda kv: -score(kv[0], *kv[1]))[:beam])
+    fin = sorted(((score(k, *v) + alpha * lm.logp(state(k)[0], EOS), k) for k, v in beams.items()), reverse=True)[:n]
+    out, seen = [], set()
+    for s, k in fin:
+        txt = tok.decode(k).replace("臺", "台")
+        if txt not in seen:
+            seen.add(txt)
+            out.append({"text": txt, "beam": s, "units": len(k), "ids": list(k)})
+    return out
+
+
+def rescoring_decoder(dec, mem_box, lm, alpha, beta, beam=16, n=8, att_weight=0.5, mu=0.0):
+    """DECODERS-style fn(logits, lengths, tok) -> texts: CTC(+LM) prefix beam N-best, rescored by the attention decoder.
+    mem_box["h"] = decoder memory of the same batch (filled by a forward hook on the Reader output layer)."""
+    from embed2asr.lm import lm_units
+
+    lm = lm if lm is not None else ZeroLM()
+
+    def decode(logits, lengths, tok):
+        units = lm_units(tok.itos)
+        lp = logits.float().log_softmax(-1).cpu().numpy()
+        out = []
+        for i, L in enumerate(lengths.tolist()):
+            hyps = beam_nbest(lp[i, :L], tok, lm, alpha, beta, beam, n, units)
+            att = dec.score(mem_box["h"][i].float(), L, [h["ids"] for h in hyps])
+            out.append(max(zip(hyps, att), key=lambda p: p[0]["beam"] + att_weight * p[1] + mu * p[0]["units"])[0]["text"] if hyps else "")
+        return out
+
+    return decode
 
 
 def reader_states(reader, x, lens):
