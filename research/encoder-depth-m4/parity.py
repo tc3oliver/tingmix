@@ -1,4 +1,5 @@
 """Phase 0: verify published LoRA and parity with the official inference path on MPS."""
+
 from __future__ import annotations
 
 import argparse
@@ -26,7 +27,7 @@ def run(wav, model):
         valid = torch.arange(custom.shape[1], device=custom.device)[None] < lens[:, None]
         a, b = custom.float()[valid], reference.last_hidden_state.float()[valid]
         rel = (a - b).norm() / b.norm().clamp_min(1e-9)
-        ref_rel = ((official_feat.float()[valid] - b).norm() / b.norm().clamp_min(1e-9))
+        ref_rel = (official_feat.float()[valid] - b).norm() / b.norm().clamp_min(1e-9)
         if rel.item() > 0.003 or ref_rel.item() > 0.003:
             raise AssertionError(f"Full/split forward parity failed: {rel.item()} / {ref_rel.item()}")
         logits = asr.reader(custom.float(), lens)
@@ -41,11 +42,16 @@ def run(wav, model):
             raise AssertionError(f"Greedy transcript mismatch: {greedy!r} != {official_greedy!r}")
         sync()
     return {
-        "status": "PASS", "feature_shape": list(custom.shape), "lengths": lens.cpu().tolist(),
+        "status": "PASS",
+        "feature_shape": list(custom.shape),
+        "lengths": lens.cpu().tolist(),
         "hidden_shapes": {k: list(v.shape) for k, v in h.items()},
-        "logit_shape": list(logits.shape), "relative_l2_split": rel.item(),
-        "relative_l2_official": ref_rel.item(), "greedy": greedy,
-        "transcript_match": True, "nan_inf": False,
+        "logit_shape": list(logits.shape),
+        "relative_l2_split": rel.item(),
+        "relative_l2_official": ref_rel.item(),
+        "greedy": greedy,
+        "transcript_match": True,
+        "nan_inf": False,
     }
 
 
@@ -58,13 +64,13 @@ def main():
     result = {"phase": "parity", "environment": environment(), "status": "BLOCKED"}
     try:
         from embed2asr.audio import load_audio
+
         if a.audio:
             wav = load_audio(a.audio)
             result["audio"] = {"source": str(Path(a.audio).resolve()), "kind": "speech"}
         else:
             t = np.arange(3 * 16000, dtype=np.float32) / 16000
-            wav = (0.05 * np.sin(2 * np.pi * 220 * t) +
-                   0.01 * np.random.default_rng(17).standard_normal(len(t))).astype(np.float32)
+            wav = (0.05 * np.sin(2 * np.pi * 220 * t) + 0.01 * np.random.default_rng(17).standard_normal(len(t))).astype(np.float32)
             result["audio"] = {"kind": "synthetic", "seconds": 3, "seed": 17}
         model, origin = load_adapted(a.revision)
         result["origin"] = origin
