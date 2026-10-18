@@ -16,8 +16,8 @@
 git clone https://github.com/tc3oliver/tingmix.git
 cd tingmix
 git switch research/encoder-depth-m4
-python3.12 -m venv .venv-depth
-source .venv-depth/bin/activate
+python3.12 -m venv research/encoder-depth-m4/.venv
+source research/encoder-depth-m4/.venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e '.[large,train]'
 python -m pip install imageio-ffmpeg safetensors sentencepiece
