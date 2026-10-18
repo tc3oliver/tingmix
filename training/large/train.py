@@ -32,6 +32,7 @@ import torch
 import torch.nn.functional as F
 
 from tingmix.models.large import encoder as E
+from tingmix.models.large.attention import reader_states
 from training.large import checkpoint as C
 from training.large import dataset as D
 
@@ -79,6 +80,16 @@ def parse(argv=None):
     p.add_argument("--resume", choices=["auto", "no"], default="auto")
     p.add_argument("--allow-code-change", action="store_true")
     p.add_argument("--device", default="cuda")
+    p.add_argument("--att-layers", type=int, default=0, help="attention decoder layers (0 = CTC only); see models/large/attention.py")
+    p.add_argument("--att-d", type=int, default=512)
+    p.add_argument("--att-heads", type=int, default=8)
+    p.add_argument("--att-ff", type=int, default=2048)
+    p.add_argument("--att-dropout", type=float, default=0.1)
+    p.add_argument("--att-mem", choices=["reader", "enc"], default="reader", help="decoder memory: Reader states or encoder features")
+    p.add_argument("--att-weight", type=float, default=0.3, help="joint loss = (1-w) CTC + w attention (ignored with --freeze-front)")
+    p.add_argument("--att-smoothing", type=float, default=0.1)
+    p.add_argument("--lr-att", type=float, default=5e-4)
+    p.add_argument("--freeze-front", action="store_true", help="encoder delta + reader fixed; train the attention decoder only")
     pre, _ = p.parse_known_args(argv)
     if pre.config:
         import yaml
@@ -105,7 +116,7 @@ def sha_files(paths):
 
 def code_hash():
     root = Path(__file__).resolve().parents[2]
-    files = sorted([*root.glob("training/large/*.py"), root / "src/tingmix/models/large/encoder.py"])
+    files = sorted([*root.glob("training/large/*.py"), root / "src/tingmix/models/large/encoder.py", root / "src/tingmix/models/large/attention.py"])
     return hashlib.sha256(b"".join(f.read_bytes() for f in files)).hexdigest()[:16]
 
 
@@ -199,14 +210,27 @@ def run(a):
     reader = Reader(**init["cfg"]).to(dev)
     reader.load_state_dict(init["model"])
     reader.train()
+    if a.freeze_front:
+        reader.eval()  # fixed front: no dropout, reproduces the deployed CTC path exactly
     n_enc = sum(p.numel() for p in enc_params)
     print(
         f"mode {a.mode}: encoder trainable {n_enc / 1e6:.2f}M, reader {sum(p.numel() for p in reader.parameters()) / 1e6:.2f}M", flush=True
     )
 
-    groups = [{"params": list(reader.parameters()), "lr": a.lr_reader}]
-    if enc_params:
+    dec = None
+    if a.att_layers:
+        from tingmix.models.large.attention import AttDecoder
+
+        mem_dim = 2 * init["cfg"]["gru"] if a.att_mem == "reader" else E.FEATURE_DIM
+        dec = AttDecoder(mem_dim, len(tok.itos), a.att_d, a.att_layers, a.att_heads, a.att_ff, a.att_dropout).to(dev)
+        print(f"attention decoder: {sum(p.numel() for p in dec.parameters()) / 1e6:.2f}M (memory {a.att_mem} {mem_dim})", flush=True)
+    if a.freeze_front and dec is None:
+        raise Permanent("--freeze-front needs --att-layers")
+    groups = [] if a.freeze_front else [{"params": list(reader.parameters()), "lr": a.lr_reader}]
+    if enc_params and not a.freeze_front:
         groups.append({"params": enc_params, "lr": a.lr_enc})
+    if dec is not None:
+        groups.append({"params": list(dec.parameters()), "lr": a.lr_att})
     opt = torch.optim.AdamW(groups, weight_decay=a.wd)
 
     def lam(s):
@@ -232,6 +256,8 @@ def run(a):
             if probs:
                 raise Permanent("cannot resume: " + "; ".join(probs))
             reader.load_state_dict(r["reader"])
+            if dec is not None:
+                dec.load_state_dict(r["att"])
             own = dict(tower.named_parameters())
             with torch.no_grad():
                 for n, t in r["enc"].items():
@@ -271,6 +297,7 @@ def run(a):
             "data_hash": data_hash,
             "code": code_hash(),
             "commit": os.environ.get("TINGMIX_COMMIT", ""),
+            **({"att": dec.state_dict(), "att_cfg": {**dec.cfg, "mem": a.att_mem}} if dec is not None else {}),
         }
 
     def export(name, extra=None):
@@ -287,6 +314,7 @@ def run(a):
                 "metrics": extra,
                 "commit": os.environ.get("TINGMIX_COMMIT", ""),
                 "data_hash": data_hash,
+                **({"att": dec.state_dict(), "att_cfg": {**dec.cfg, "mem": a.att_mem}} if dec is not None else {}),
             },
             a.out / name,
         )
@@ -317,15 +345,27 @@ def run(a):
             y = E.top(tower, x, lens, a.start).float()
         return y * (torch.arange(x.shape[1], device=dev)[None] < lens[:, None])[..., None], lens
 
+    def split(tg, tl):
+        return [y.tolist() for y in torch.split(tg, tl.tolist())]
+
+    def att_loss(x, h, lens, tg, tl):
+        return dec.loss(h if a.att_mem == "reader" else x, lens, split(tg, tl), a.att_smoothing)
+
     @torch.no_grad()
     def evaluate():
         reader.eval()
+        if dec is not None:
+            dec.eval()
         out = {}
         for name, (rows, metric, bs, batches) in dev_mel.items():
-            pairs, mixed = [], []
-            for b, (mel, mask, _, _, texts, langs) in zip(bs, batches):
+            pairs, mixed, ce = [], [], []
+            for b, (mel, mask, tg, tl, texts, langs) in zip(bs, batches):
                 x, lens = forward_enc(mel, mask, a.mode)
-                ids = reader(x, lens.cpu()).argmax(-1).cpu().tolist()
+                logits, h = reader_states(reader, x, lens.cpu())
+                if dec is not None:
+                    c, acc = att_loss(x, h, lens, tg, tl)
+                    ce.append((float(c), float(acc), int(tl.sum())))
+                ids = logits.argmax(-1).cpu().tolist()
                 for seq, L, ref, lg in zip(ids, lens.tolist(), texts, langs):
                     hyp = tok.decode(collapse_ctc(seq[:L]))
                     pairs.append((ref, hyp))
@@ -337,7 +377,15 @@ def run(a):
                 out[name + "_all"] = corpus(pairs, "MER")["value"]
             else:
                 out[name] = corpus(pairs, m)["value"]
+            if ce:
+                n = sum(k for _, _, k in ce)
+                out[name + "_att_ce"] = sum(c * k for c, _, k in ce) / n
+                out[name + "_att_acc"] = sum(c * k for _, c, k in ce) / n
         reader.train()
+        if dec is not None:
+            dec.train()
+        if a.freeze_front:
+            reader.eval()
         return out
 
     sampler = D.RotateSampler(pools, a.seed)
@@ -353,7 +401,7 @@ def run(a):
         m = evaluate()
         if st["base"] is None:
             st["base"] = m
-        keys = [k for k in devsets]
+        keys = [k + "_att_ce" for k in devsets] if a.freeze_front else [k for k in devsets]
         score = float(np.mean([m[k] / max(st["base"][k], 1e-9) for k in keys]))
         rec = {"type": "eval", "step": st["step"], "epoch": st["epoch"], **{k: round(v, 5) for k, v in m.items()}, "score": round(score, 5)}
         rec["eval_s"] = round(time.time() - t, 1)
@@ -386,19 +434,30 @@ def run(a):
             D.loader(rows, batches, fe, tok.encode, a.workers, st["batch"], a.features), st["batch"]
         ):
             agg["wait"] += time.time() - t_wait
-            x, lens = forward_enc(mel, mask, a.mode)
-            x = D.time_mask(x, lens, a.time_mask, gen)
-            logits = reader(x, lens.cpu())
-            lp = logits.float().log_softmax(-1).transpose(0, 1)
-            per = F.ctc_loss(lp, tg.to(dev), lens, tl.to(dev), blank=0, reduction="none", zero_infinity=False)
-            fin = torch.isfinite(per)
-            if not bool(fin.any()):
-                raise Permanent(f"all CTC losses non-finite at step {st['step']}")
-            loss = (per / tl.to(dev).clamp(min=1))[fin].mean()
+            with torch.set_grad_enabled(not a.freeze_front):
+                x, lens = forward_enc(mel, mask, a.mode)
+                x = D.time_mask(x, lens, a.time_mask, gen)
+                logits, h = reader_states(reader, x, lens.cpu())
+            if a.freeze_front:
+                fin = torch.ones(len(tl), dtype=torch.bool)
+                loss, acc = att_loss(x, h, lens, tg, tl)
+            else:
+                lp = logits.float().log_softmax(-1).transpose(0, 1)
+                per = F.ctc_loss(lp, tg.to(dev), lens, tl.to(dev), blank=0, reduction="none", zero_infinity=False)
+                fin = torch.isfinite(per)
+                if not bool(fin.any()):
+                    raise Permanent(f"all CTC losses non-finite at step {st['step']}")
+                loss = (per / tl.to(dev).clamp(min=1))[fin].mean()
+                if dec is not None:
+                    c, acc = att_loss(x, h, lens, tg, tl)
+                    loss = (1 - a.att_weight) * loss + a.att_weight * c
             opt.zero_grad(set_to_none=True)
             loss.backward()
-            agg["gn"] += float(torch.nn.utils.clip_grad_norm_(reader.parameters(), a.grad_clip))
-            if enc_params:
+            if not a.freeze_front:
+                agg["gn"] += float(torch.nn.utils.clip_grad_norm_(reader.parameters(), a.grad_clip))
+            if dec is not None:
+                agg["gn"] += float(torch.nn.utils.clip_grad_norm_(dec.parameters(), a.grad_clip))
+            if enc_params and not a.freeze_front:
                 agg["gne"] += float(torch.nn.utils.clip_grad_norm_(enc_params, a.grad_clip))
             opt.step()
             sched.step()
