@@ -11,8 +11,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from common import (early, environment, executed_params, load_adapted,
-                    mel_input, require_mps, sync, write_json)
+from common import early, environment, executed_params, load_adapted, mel_input, require_mps, sync, write_json
 
 
 def percentile(xs, q):
@@ -82,7 +81,8 @@ def main():
         res["mps_allocated_bytes_start"] = torch.mps.current_allocated_memory()
         for secs in res["durations_s"]:
             wav, kind = waveform(secs, a.audio)
-            inp = lambda: fe([wav], sampling_rate=16000, return_tensors="pt")
+            def inp():
+                return fe([wav], sampling_rate=16000, return_tensors="pt")
             prep = measure(inp, a.iterations, a.warmup, gpu=False)
             mel, mask = mel_input(wav, fe)
             for depth in (6, 9, 12):
