@@ -119,8 +119,13 @@ def tune(a):
                 best = (lam, mu, r)
     lam, mu, r = best
     pick = lambda nb, ref: max(nb, key=lambda h: h["beam"] + lam * h[a.field] + mu * h["units"])["text"]  # noqa: E731
+    held = _rate(data, pick, 1)
     print("best lam", lam, "mu", mu, "tune", {k: round(v, 4) for k, v in r.items()})
-    print("held-out", {k: round(v, 4) for k, v in _rate(data, pick, 1).items()})
+    print("held-out", {k: round(v, 4) for k, v in held.items()})
+    if a.out:
+        base = [_rate(data, lambda nb, ref: nb[0]["text"], part) for part in (0, 1)]
+        Path(a.out).write_text(json.dumps({"lam": lam, "mu": mu, "tune": r, "held_out": held, "beam_tune": base[0], "beam_held_out": base[1],
+                                           "held_out_score": tot(held), "beam_held_out_score": tot(base[1])}, indent=1))
 
 
 def main(argv=None):
@@ -144,6 +149,7 @@ def main(argv=None):
     t = s.add_parser("tune")
     t.add_argument("--scored", required=True)
     t.add_argument("--field", default="llm", help="per-hypothesis score to combine (llm | att)")
+    t.add_argument("--out", help="write the chosen weights and rates as JSON")
     t.add_argument("--lam", nargs="+", type=float, default=[0.0, 0.1, 0.2, 0.3, 0.5, 0.7, 1.0])
     t.add_argument("--mu", nargs="+", type=float, default=[0.0, 0.5, 1.0, 2.0])
     a = p.parse_args(argv)
