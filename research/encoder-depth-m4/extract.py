@@ -57,6 +57,7 @@ def main():
     p.add_argument("--train-set", action="append", default=[], metavar="NAME=MANIFEST")
     p.add_argument("--dev-set", action="append", default=[], metavar="NAME=MANIFEST")
     p.add_argument("--revision", help="released TingMix-Large HF commit")
+    p.add_argument("--parity", type=Path, default=Path("research/encoder-depth-m4/runs/parity.json"))
     p.add_argument("--limit", type=int, default=0, help="smoke subset; disallow release-level conclusions")
     p.add_argument("--out", type=Path, default=Path("research/encoder-depth-m4/runs/features"))
     a = p.parse_args()
@@ -73,7 +74,13 @@ def main():
                                             [r for rs in dev.values() for r in rs])
         else:
             result["overlap"] = {"exact_duplicates": "NOT_CHECKED", "near_duplicate_audit": "NOT_VERIFIED"}
-        model, origin = load_adapted(a.revision)
+        parity = json.loads(a.parity.read_text(encoding="utf-8"))
+        if parity.get("status") != "PASS":
+            raise RuntimeError("MPS parity did not pass; feature extraction is blocked")
+        model, origin = load_adapted(a.revision or parity["origin"]["hf_revision"])
+        if (origin["hf_revision"] != parity["origin"]["hf_revision"] or
+                origin["delta_sha256"] != parity["origin"]["delta_sha256"]):
+            raise RuntimeError("Feature extraction release differs from MPS parity release")
         result["origin"] = origin
         fe = model.asr.encoder.feature_extractor
         towers = {"adapted": model.asr.encoder.tower, "base": load_base()}
