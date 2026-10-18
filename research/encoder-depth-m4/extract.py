@@ -7,9 +7,7 @@ import traceback
 from pathlib import Path
 
 import numpy as np
-
-from common import (FEATURES, environment, load_adapted, load_base, mel_input,
-                    no_overlap, read_manifest, sample_key, stages, write_json)
+from common import FEATURES, environment, load_adapted, load_base, mel_input, no_overlap, read_manifest, sample_key, stages, write_json
 
 
 def specs(values):
