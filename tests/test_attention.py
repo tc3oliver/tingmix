@@ -1,5 +1,5 @@
+import pytest
 import torch
-from embed2asr.reader import Reader
 
 from tingmix.models.large.attention import AttDecoder, reader_states
 
@@ -15,6 +15,7 @@ def test_decoder_padding_and_reader_hook():
     b = dec.score(mem[1, :5], 5, [[4]])
     assert abs(a[0] - b[0]) < 1e-4
     # the hook only observes: CTC logits are unchanged
+    Reader = pytest.importorskip("embed2asr.reader").Reader
     r = Reader(16, 10, d=8, gru=4, blocks=1).eval()
     lg, h = reader_states(r, mem, torch.tensor([7, 5]))
     assert h.shape[-1] == 8 and torch.allclose(lg, r(mem, torch.tensor([7, 5])))
