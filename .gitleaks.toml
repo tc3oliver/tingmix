@@ -1,0 +1,8 @@
+# gitleaks: default rules + allowlist for SHA-256 digests recorded in benchmark/result JSON (not secrets)
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "sha256 digests of model/tokenizer files"
+regexTarget = "line"
+regexes = ['''"[A-Za-z0-9_]*sha256"\s*:\s*"[0-9a-f]{64}"''']
