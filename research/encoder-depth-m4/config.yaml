@@ -1,0 +1,52 @@
+# Research-only configuration. Scripts use these explicit CLI equivalents; no production config changes.
+study: tingmix-large-encoder-depth-m4
+status: not_run
+hardware: Mac Studio M4 Max 64GB
+device: mps
+allow_cpu_fallback: false
+precision: fp32
+hf_release: tc3oliver/TingMix-Large
+hf_revision: resolved_at_parity_and_pinned_in_results
+encoder:
+  id: google/embeddinggemma-2
+  revision: 914f7f89142e33e77833254d9c9b90c3cef7303b
+  base_parameters_expected: 304824608
+  hidden: 1024
+  projected: 1536
+  layers: 12
+  frame_rate: 25
+  lora_rank_expected: 16
+features: [L3, L6, L9, L12, L12-Proj]
+exits: [6, 9, 12]
+audio_seconds: [5, 15, 25]
+latency:
+  batch_size: 1
+  warmup: 6
+  iterations: 50
+  synchronization: torch.mps.synchronize
+linear_probe:
+  seed: 1337
+  epochs: 8
+  learning_rate: 0.0003
+  optimizer: AdamW
+  weight_decay: 0.01
+  head: layer_norm_no_params_then_linear_ctc
+  same_features_and_targets: true
+  ctc_blank: 0
+  zero_infinity: false
+datasets:
+  train: []     # local legal JSONL manifests; never commit
+  dev: []       # local legal JSONL manifests; never commit
+  test: forbidden
+  required_dev_sets:
+    CV: CER
+    FLEURS: WER
+    ASCEND: MER
+  near_duplicate_check: requires_separate_audio_similarity_audit
+  normalization: existing_embed2asr_metrics
+decision:
+  go_probe_relative_error_threshold: 0.05
+  go_encoder_p50_improvement_threshold: 0.15
+  requires_cross_language_no_material_regression: true
+  minimum_evidence: representative_independent_dev_and_repeatability
+  these_are_preregistered_research_gate_not_release_gate: true
