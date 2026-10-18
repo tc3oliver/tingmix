@@ -31,6 +31,8 @@ def main(argv=None):
     p.add_argument("--lm-alpha", type=float, default=0.25)
     p.add_argument("--lm-beta", type=float, default=1.5)
     p.add_argument("--beam", type=int, default=16)
+    p.add_argument("--att-weight", type=float, default=0.0, help=".pt with an attention decoder: rescoring weight (0 = off)")
+    p.add_argument("--att-mu", type=float, default=0.0, help="attention rescoring: per-unit bonus")
     a = p.parse_args(argv)
 
     from embed2asr.audio import load_audio
@@ -40,6 +42,8 @@ def main(argv=None):
 
     a.out.mkdir(parents=True, exist_ok=True)
     lm = dict(lm=a.lm, lm_alpha=a.lm_alpha, lm_beta=a.lm_beta, beam=a.beam) if a.lm else {}
+    if a.att_weight:
+        lm |= dict(att_weight=a.att_weight, att_mu=a.att_mu, beam=a.beam)
     model = load_model(a.model, device=a.device, **lm)
     pm = [tuple(x.split("=", 1)) for x in a.map_prefix]
     summary = {"model": a.model, "lm": lm or None, "time": time.strftime("%F %T"), "sets": {}}
