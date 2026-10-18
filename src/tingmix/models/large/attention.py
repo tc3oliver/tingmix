@@ -138,7 +138,18 @@ def beam_nbest(lp, tok, lm, alpha, beta, beam, n, units, topk=8):
         txt = tok.decode(k).replace("臺", "台")
         if txt not in seen:
             seen.add(txt)
-            out.append({"text": txt, "beam": s, "units": len(k), "ids": list(k)})
+            ctx, lm_sum, scored = state(k)
+            out.append(
+                {
+                    "text": txt,
+                    "beam": s,
+                    "units": len(k),
+                    "ids": list(k),
+                    "ctc": lse(*beams[k]),
+                    "lm": lm_sum + lm.logp(ctx, EOS),
+                    "scored": scored,
+                }
+            )
     return out
 
 
