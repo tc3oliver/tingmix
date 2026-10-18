@@ -60,6 +60,8 @@ def _model(args):
     from .core.registry import load_model
 
     lm = {"lm": args.lm, "lm_alpha": args.lm_alpha, "lm_beta": args.lm_beta} if args.lm else {}
+    if args.att_weight:
+        lm |= {"att_weight": args.att_weight, "att_mu": args.att_mu}
     model = load_model(args.model, **lm)
     model.transcribe_batch([np.zeros(model.sample_rate, dtype=np.float32)])  # warm-up: the first call is slow (kernel tuning)
     return model
@@ -97,12 +99,16 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("--lm", help="character n-gram LM file (Embed2ASR format): CTC prefix beam search with the LM")
     t.add_argument("--lm-alpha", type=float, default=0.25, help="LM weight")
     t.add_argument("--lm-beta", type=float, default=1.5, help="per-character bonus")
+    t.add_argument("--att-weight", type=float, default=0.0, help=".pt with an attention decoder: N-best rescoring weight (0 = off)")
+    t.add_argument("--att-mu", type=float, default=0.0, help="attention rescoring: per-unit bonus")
     t.add_argument("--json", action="store_true")
     li = sub.add_parser("listen", help="live transcription from the microphone (or --file, paced in real time)")
     li.add_argument("--model", default="large", help="large | TingMix .pt export | Embed2ASR release dir")
     li.add_argument("--lm", help="character n-gram LM file (Embed2ASR format): CTC prefix beam search with the LM")
     li.add_argument("--lm-alpha", type=float, default=0.25, help="LM weight")
     li.add_argument("--lm-beta", type=float, default=1.5, help="per-character bonus")
+    li.add_argument("--att-weight", type=float, default=0.0, help=".pt with an attention decoder: N-best rescoring weight (0 = off)")
+    li.add_argument("--att-mu", type=float, default=0.0, help="attention rescoring: per-unit bonus")
     li.add_argument("--file")
     li.add_argument("--server", help="ws:// or wss:// URL of a `tingmix serve` instance instead of a local model")
     li.add_argument("--token", help="bearer token for --server (default: $TINGMIX_TOKEN)")
@@ -112,6 +118,8 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--lm", help="character n-gram LM file (Embed2ASR format): CTC prefix beam search with the LM")
     s.add_argument("--lm-alpha", type=float, default=0.25, help="LM weight")
     s.add_argument("--lm-beta", type=float, default=1.5, help="per-character bonus")
+    s.add_argument("--att-weight", type=float, default=0.0, help=".pt with an attention decoder: N-best rescoring weight (0 = off)")
+    s.add_argument("--att-mu", type=float, default=0.0, help="attention rescoring: per-unit bonus")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--token", help="bearer token (default: $TINGMIX_TOKEN)")
