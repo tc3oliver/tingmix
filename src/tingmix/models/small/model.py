@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 SR, N_FFT, WIN, HOP, N_MELS = 16000, 512, 400, 160, 80
+TAIL_S = 0.3  # silence flushed through the model at the end of an utterance (dev: NTUML mixed MER 35.8 -> 32.8)
 
 
 def mel_filters(n_mels=N_MELS, n_fft=N_FFT, sr=SR, fmin=20.0, fmax=7600.0):
@@ -112,7 +113,9 @@ class Stream:
         return self.decode(self.ids)
 
     def finalize(self) -> str:
-        """Final text: `final(log-probs)` (e.g. LM beam search) when given, else the greedy hypothesis."""
+        """Final text: `final(log-probs)` (e.g. LM beam search) when given, else the greedy hypothesis. Feeds TAIL_S of
+        silence first: the causal model emits the last tokens a few frames after the audio that carries them."""
+        self.accept(torch.zeros(int(TAIL_S * SR)))
         if self.final is not None and self.logp:
             return self.final(torch.cat(self.logp))
         return self.decode(self.ids)

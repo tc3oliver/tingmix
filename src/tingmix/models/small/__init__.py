@@ -75,6 +75,9 @@ class SmallModel:
 
         if not wavs:
             return []
+        from .model import SR, TAIL_S
+
+        wavs = [np.concatenate([np.asarray(w, dtype=np.float32), np.zeros(int(TAIL_S * SR), np.float32)]) for w in wavs]  # as Stream.finalize
         lens = torch.tensor([len(w) for w in wavs])
         x = torch.nn.utils.rnn.pad_sequence([torch.as_tensor(w, dtype=torch.float32) for w in wavs], batch_first=True).to(self.device)
         with torch.inference_mode():
