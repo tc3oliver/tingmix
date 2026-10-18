@@ -23,6 +23,8 @@ def main(argv=None):
     p.add_argument("export", type=Path)
     p.add_argument("out", type=Path)
     p.add_argument("--note", default="")
+    p.add_argument("--att-weight", type=float, default=1.0, help="default attention rescoring weight (export with a decoder)")
+    p.add_argument("--att-mu", type=float, default=0.0)
     a = p.parse_args(argv)
     ck = torch.load(a.export, map_location="cpu", weights_only=False)
     save_release(a.out, ck["reader"], ck["reader_cfg"], ck["itos"], ck["tok"].get("sp"))
@@ -36,6 +38,15 @@ def main(argv=None):
         "commit": ck.get("commit"),
         "note": a.note,
     }
+    if "att" in ck:  # attention decoder for N-best rescoring (models/large/attention.py)
+        save_file(
+            {k: v.contiguous() for k, v in ck["att"].items()}, str(a.out / "attention_decoder.safetensors"), metadata={"format": "pt"}
+        )
+        meta |= {
+            "attention_decoder": ck["att_cfg"],
+            "attention_decoder_file": "attention_decoder.safetensors",
+            "rescore": {"att_weight": a.att_weight, "att_mu": a.att_mu, "nbest": 8},
+        }
     (a.out / "tingmix.json").write_text(json.dumps(meta, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     sums = {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(a.out.iterdir()) if f.is_file() and f.name != "SHA256SUMS"}
     (a.out / "SHA256SUMS").write_text("".join(f"{h}  {n}\n" for n, h in sums.items()))

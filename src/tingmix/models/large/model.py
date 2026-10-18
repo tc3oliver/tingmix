@@ -9,6 +9,22 @@ import numpy as np
 DEFAULT_REPO = "tc3oliver/Embed2ASR-v1"
 
 
+def _attach_att(asr, cfg, state, lm_args, beam, nbest, att_weight, att_mu):
+    """Final/partial texts = CTC(+LM) prefix beam N-best rescored by the attention decoder over the Reader states."""
+    from .attention import AttDecoder, rescoring_decoder
+
+    cfg = dict(cfg)
+    if cfg.pop("mem") != "reader":
+        raise ValueError("inference supports decoders over Reader states only")
+    dec = AttDecoder(**cfg)
+    dec.load_state_dict(state)
+    dec.to(asr.device).eval()
+    box = {}
+    asr.reader.out.register_forward_hook(lambda mod, inp, out: box.__setitem__("h", inp[0]))  # __setitem__ returns None
+    a, b = (lm_args[1], lm_args[2]) if lm_args else (0.0, 0.0)
+    asr.decode = rescoring_decoder(dec, box, lm_args[0] if lm_args else None, a, b, beam, nbest, att_weight, att_mu)
+
+
 class LargeModel:
     name = "tingmix-large"
     sample_rate = 16000
@@ -32,6 +48,7 @@ class LargeModel:
             from huggingface_hub import snapshot_download
 
             path = Path(snapshot_download(str(path_or_repo), revision=kw.pop("revision", None)))
+        att = {k: kw.pop(k) for k in ("att_weight", "att_mu", "nbest") if k in kw}
         asr = Embed2ASR.from_pretrained(path, device=device, **kw)
         if encoder_delta is None and (path / "tingmix.json").is_file():
             from safetensors.torch import load_file
@@ -42,6 +59,29 @@ class LargeModel:
             from .encoder import load_delta
 
             load_delta(asr.encoder.tower, *encoder_delta)
+        meta = json.loads((path / "tingmix.json").read_text(encoding="utf-8")) if (path / "tingmix.json").is_file() else {}
+        if "attention_decoder" in meta:  # release default: rescoring on (tingmix.json "rescore"); att_weight=0 turns it off
+            r = {**meta.get("rescore", {}), **att}
+            if r.get("att_weight"):
+                from safetensors.torch import load_file
+
+                lm_args = None
+                if kw.get("lm"):
+                    from embed2asr.lm import CharLM
+
+                    lm = Path(kw["lm"]) if Path(kw["lm"]).is_file() else path / kw["lm"]
+                    lm_args = (CharLM.load(lm), kw.get("lm_alpha", 0.25), kw.get("lm_beta", 1.5))
+                state = load_file(str(path / meta["attention_decoder_file"]))
+                _attach_att(
+                    asr,
+                    meta["attention_decoder"],
+                    state,
+                    lm_args,
+                    kw.get("beam", 16),
+                    r.get("nbest", 8),
+                    r["att_weight"],
+                    r.get("att_mu", 0.0),
+                )
         return cls(asr)
 
     @classmethod
@@ -83,18 +123,7 @@ class LargeModel:
             lm_args = (CharLM.load(lm), lm_alpha, lm_beta, beam)
         asr = Embed2ASR(reader, Tok(ck["itos"], sp), encoder, config, device, lm=lm_args)
         if "att" in ck and att_weight:  # joint CTC/attention: the decoder rescores the CTC(+LM) beam's N-best
-            from .attention import AttDecoder, rescoring_decoder
-
-            cfg = dict(ck["att_cfg"])
-            if cfg.pop("mem") != "reader":
-                raise ValueError("inference supports decoders over Reader states only")
-            dec = AttDecoder(**cfg)
-            dec.load_state_dict(ck["att"])
-            dec.to(device).eval()
-            box = {}
-            reader.out.register_forward_hook(lambda mod, inp, out: box.__setitem__("h", inp[0]))  # __setitem__ returns None
-            a, b = (lm_args[1], lm_args[2]) if lm_args else (0.0, 0.0)
-            asr.decode = rescoring_decoder(dec, box, lm_args[0] if lm_args else None, a, b, beam, nbest, att_weight, att_mu)
+            _attach_att(asr, ck["att_cfg"], ck["att"], lm_args, beam, nbest, att_weight, att_mu)
         return cls(asr)
 
     def transcribe_batch(self, wavs: list[np.ndarray]) -> list[str]:
