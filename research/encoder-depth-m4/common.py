@@ -1,4 +1,5 @@
 """Shared, fail-closed helpers for the M4 encoder-depth study. Never downloads a different ASR release."""
+
 from __future__ import annotations
 
 import hashlib
@@ -54,6 +55,7 @@ def sync():
 
 def environment():
     import transformers
+
     try:
         commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     except (OSError, subprocess.CalledProcessError):
@@ -89,11 +91,16 @@ def resolve_release(revision=None):
     delta_file = path / meta["encoder_delta_file"]
     if not delta_file.is_file():
         raise RuntimeError(f"RELEASE_MISMATCH: missing LoRA delta {delta_file.name}")
-    return path, {"hf_repo": REPO, "hf_revision": sha, "encoder_revision": E.ENCODER_REVISION,
-                  "delta_name": delta_file.name, "delta_sha256": sha256(delta_file),
-                  "reader_sha256": sha256(path / "model.safetensors"),
-                  "tokenizer_sha256": sha256(path / "units.json"),
-                  "delta_config": meta["encoder_delta"]}
+    return path, {
+        "hf_repo": REPO,
+        "hf_revision": sha,
+        "encoder_revision": E.ENCODER_REVISION,
+        "delta_name": delta_file.name,
+        "delta_sha256": sha256(delta_file),
+        "reader_sha256": sha256(path / "model.safetensors"),
+        "tokenizer_sha256": sha256(path / "units.json"),
+        "delta_config": meta["encoder_delta"],
+    }
 
 
 def load_adapted(revision=None):
@@ -119,8 +126,10 @@ def load_adapted(revision=None):
     with safe_open(str(path / origin["delta_name"]), framework="pt", device="cpu") as f:
         got = set(f.keys())
     if not expected or expected != got:
-        raise RuntimeError(f"LoRA integrity mismatch: expected {len(expected)} tensors, release has {len(got)}; "
-                           f"missing={sorted(expected-got)[:4]}, extra={sorted(got-expected)[:4]}")
+        raise RuntimeError(
+            f"LoRA integrity mismatch: expected {len(expected)} tensors, release has {len(got)}; "
+            f"missing={sorted(expected - got)[:4]}, extra={sorted(got - expected)[:4]}"
+        )
     origin["encoder_params"] = sum(p.numel() for p in tower.parameters())
     origin["encoder_base_params"] = sum(p.numel() for n, p in tower.named_parameters() if ".lora_" not in n)
     origin["lora_params"] = sum(p.numel() for n, p in tower.named_parameters() if ".lora_" in n)
@@ -192,7 +201,7 @@ def read_manifest(path):
         r = json.loads(line)
         for required in ("audio", "text"):
             if not r.get(required):
-                raise ValueError(f"{path}:{i+1} missing {required}")
+                raise ValueError(f"{path}:{i + 1} missing {required}")
         if not Path(r["audio"]).is_file():
             raise FileNotFoundError(r["audio"])
         rows.append(r)
@@ -201,6 +210,7 @@ def read_manifest(path):
 
 def no_overlap(train, dev):
     """Exact byte-identical path/content overlap is a hard error; near duplicates still require an external audit."""
+
     def keys(rows):
         found = set()
         for r in rows:
@@ -208,6 +218,7 @@ def no_overlap(train, dev):
             found.add(("path", str(path)))
             found.add(("bytes", sha256(path)))
         return found
+
     overlap = keys(train) & keys(dev)
     if overlap:
         raise RuntimeError(f"TRAIN_DEV_LEAKAGE: {len(overlap)} matching exact audio identifiers")
