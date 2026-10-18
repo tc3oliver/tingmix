@@ -1,8 +1,38 @@
 # TingMix-Large benchmark
 
-Released model: [tc3oliver/TingMix-Large](https://huggingface.co/tc3oliver/TingMix-Large) (2026-10-17).
+Released model: [tc3oliver/TingMix-Large](https://huggingface.co/tc3oliver/TingMix-Large) v3 (2026-10-18; v2 = revision `v2`).
 
-## Released model (single test run)
+## v3: attention-decoder rescoring (single test run)
+
+v2 unchanged (encoder LoRA, Reader, LM) plus a 30.8M-parameter Transformer decoder (6 layers, d 512) trained on the
+Reader states with everything else frozen (28k steps, 4 GPU-hours). Decoding: CTC + LM prefix beam (beam 16) -> 8 best
+hypotheses -> score = beam score + 1.0 x attention log-probability. The weight was chosen on even-numbered dev rows and
+checked on odd-numbered rows; the test sets were run once, after the choice.
+
+| Test set | Metric | v2 | v3 | paired difference, 95% bootstrap CI (points) |
+|---|---|---|---|---|
+| Common Voice zh-TW 27.0 | CER | 12.26 | **12.02** | -0.23 [-0.41, -0.07] |
+| Parliament A | CER | 17.41 | **17.10** | -0.31 [-0.44, -0.18] |
+| Parliament B | CER | 17.86 | **17.57** | -0.29 [-0.34, -0.23] |
+| ASCEND, mixed sentences | MER | 20.76 | **20.02** | -0.86 [-1.21, -0.50] (all rows) |
+| NTUML2021, mixed sentences (in-domain) | MER | 15.15 | **13.39** | -1.24 [-1.33, -1.14] (all rows) |
+| FLEURS en_us | WER | 19.88 | **19.00** | -0.88 [-1.11, -0.66] |
+| LibriSpeech test-clean | WER | 7.89 | **7.05** | -0.85 [-0.95, -0.74] |
+| LibriSpeech test-other | WER | 17.28 | **16.11** | -1.17 [-1.29, -1.05] |
+| VoxPopuli en | WER | 13.61 | **12.78** | -0.82 [-0.94, -0.71] |
+| AMI IHM | WER | 20.90 | **18.76** | -2.14 [-2.26, -2.01] |
+
+Development sets (full, end-to-end): without any LM the rescoring alone improves every set over greedy CTC
+(CV 11.70 -> 10.89, NTUML 24.16 -> 21.14, FLEURS 20.47 -> 18.89, LibriSpeech dev 7.82 -> 6.92, VoxPopuli dev 13.49 -> 12.40;
+LibriSpeech and VoxPopuli dev were not used for any choice). Streaming (50 dev clips per set): final CER/MER CV 10.24 -> 9.43,
+ASCEND 19.70 -> 18.81, NTUML 14.92 -> 13.31; per-update compute p50 93 -> 108 ms, final latency p50 0.743 -> 0.757 s.
+CPU inference works but is not real time for Large (RTF about 7 for v2 and v3 alike).
+
+Ablations (dev): a decoder reading the encoder features instead of the Reader states is on par at equal steps; joint
+CTC + attention fine-tuning of the Reader and LoRA (0.7/0.3) is within seed noise of a matched control without the
+attention loss, i.e. the attention loss did not improve the CTC model itself; the gain comes from rescoring.
+
+## v2 (single test run)
 
 Fine-tuned from the earlier candidate below with the NTUML2021 **train** split added (official lecture-disjoint
 train/test split: 0 shared lectures; 2 train lectures held out as NTUML dev for selection). NTUML2021 test is therefore

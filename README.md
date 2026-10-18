@@ -2,8 +2,8 @@
 
 Real-time speech recognition for **Taiwanese Mandarin, English and intra-sentence Mandarin-English code-switching**.
 
-Status: TingMix-Large is released on Hugging Face ([tc3oliver/TingMix-Large](https://huggingface.co/tc3oliver/TingMix-Large));
-TingMix-Small is at the interface stage. What works today:
+Status: both models are released on Hugging Face: [tc3oliver/TingMix-Large](https://huggingface.co/tc3oliver/TingMix-Large)
+(v3, GPU) and [tc3oliver/TingMix-Small](https://huggingface.co/tc3oliver/TingMix-Small) (CPU, native streaming). What works today:
 
 - `tingmix transcribe | listen | serve` with Embed2ASR-v1 or a TingMix-Large training export, optional character
   n-gram LM decoding (`--lm`), WebSocket streaming with bearer-token auth;
@@ -15,8 +15,8 @@ TingMix-Small is at the interface stage. What works today:
 
 | family | target | streaming | status |
 |---|---|---|---|
-| **TingMix-Large** | GPU, accuracy first | buffered re-decoding of an offline encoder (honest label: not native streaming) | in training |
-| **TingMix-Small** | CPU, real time on a regular PC | native stateful streaming (planned) | interface only |
+| **TingMix-Large** | GPU, accuracy first | buffered re-decoding of an offline encoder (honest label: not native streaming) | released (v3) |
+| **TingMix-Small** | CPU, real time on a regular PC | native stateful streaming (causal GRU-CTC) | released |
 
 Both share one streaming API (partial / final events; a final is never revised).
 
@@ -30,16 +30,18 @@ implements `tingmix.models.base`.
 
 Model: [huggingface.co/tc3oliver/TingMix-Large](https://huggingface.co/tc3oliver/TingMix-Large)
 
-| Test set | Metric | Embed2ASR-v1 | TingMix-Large |
-|---|---|---|---|
-| Common Voice zh-TW | CER | 15.62 | **12.26** |
-| Parliament A | CER | 19.17 | **17.41** |
-| ASCEND mixed | MER | 23.90 | **20.76** |
-| NTUML2021 mixed (in-domain: train split used) | MER | 29.48 | **15.15** |
-| FLEURS en_us | WER | 24.52 | **19.88** |
-| LibriSpeech test-clean | WER | 8.99 | **7.89** |
+| Test set | Metric | Embed2ASR-v1 | TingMix-Large v2 | TingMix-Large v3 |
+|---|---|---|---|---|
+| Common Voice zh-TW | CER | 15.62 | 12.26 | **12.02** |
+| Parliament A | CER | 19.17 | 17.41 | **17.10** |
+| ASCEND mixed | MER | 23.90 | 20.76 | **20.02** |
+| NTUML2021 mixed (in-domain: train split used) | MER | 29.48 | 15.15 | **13.39** |
+| FLEURS en_us | WER | 24.52 | 19.88 | **19.00** |
+| LibriSpeech test-clean | WER | 8.99 | 7.89 | **7.05** |
+| AMI IHM | WER | 23.59 | 20.90 | **18.76** |
 
-Embed2ASR-v1 = published greedy numbers; TingMix-Large uses its character LM. Full table, protocol, caveats and the
+Embed2ASR-v1 = published greedy numbers; v2 = CTC + character LM; v3 = v2 + attention-decoder rescoring of the CTC
+N-best (`attention_decoder.safetensors`, on by default; v2 stays available as revision `v2`). Full table, protocol, caveats and the
 earlier NTUML-unseen candidate: [docs/benchmark.md](docs/benchmark.md).
 
 ## Install

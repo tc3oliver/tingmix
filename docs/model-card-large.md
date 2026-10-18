@@ -1,6 +1,6 @@
 # TingMix-Large model card
 
-Released: [tc3oliver/TingMix-Large](https://huggingface.co/tc3oliver/TingMix-Large) (the Hugging Face card is the
+Released: [tc3oliver/TingMix-Large](https://huggingface.co/tc3oliver/TingMix-Large) (v3 = v2 + attention-decoder rescoring; see docs/benchmark.md) (the Hugging Face card is the
 authoritative copy). The released version is additionally fine-tuned with the NTUML2021 train split.
 
 ## Model
