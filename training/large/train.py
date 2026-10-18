@@ -224,6 +224,11 @@ def run(a):
         mem_dim = 2 * init["cfg"]["gru"] if a.att_mem == "reader" else E.FEATURE_DIM
         dec = AttDecoder(mem_dim, len(tok.itos), a.att_d, a.att_layers, a.att_heads, a.att_ff, a.att_dropout).to(dev)
         print(f"attention decoder: {sum(p.numel() for p in dec.parameters()) / 1e6:.2f}M (memory {a.att_mem} {mem_dim})", flush=True)
+        if "att" in init:  # warm-start the decoder too (e.g. joint fine-tuning after a decoder-only run)
+            if init["att_cfg"].get("mem") != a.att_mem:
+                raise Permanent(f"--init decoder memory {init['att_cfg'].get('mem')} != {a.att_mem}")
+            dec.load_state_dict(init["att"])
+            print(f"[init] attention decoder from {a.init}", flush=True)
     if a.freeze_front and dec is None:
         raise Permanent("--freeze-front needs --att-layers")
     groups = [] if a.freeze_front else [{"params": list(reader.parameters()), "lr": a.lr_reader}]
