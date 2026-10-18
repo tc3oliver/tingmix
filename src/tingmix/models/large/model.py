@@ -46,8 +46,16 @@ class LargeModel:
 
     @classmethod
     def from_checkpoint(
-        cls, path: str, device: str | None = None, lm: str | None = None, lm_alpha: float = 0.25, lm_beta: float = 1.5, beam: int = 16,
-        att_weight: float = 0.0, att_mu: float = 0.0, nbest: int = 8,
+        cls,
+        path: str,
+        device: str | None = None,
+        lm: str | None = None,
+        lm_alpha: float = 0.25,
+        lm_beta: float = 1.5,
+        beam: int = 16,
+        att_weight: float = 0.0,
+        att_mu: float = 0.0,
+        nbest: int = 8,
     ) -> LargeModel:
         """Load a TingMix-Large training export (.pt): reader, tokenizer and encoder delta (trusted file: unpickled).
         `lm`: Embed2ASR character n-gram LM file -> CTC prefix beam search (CJK units scored; English pieces LM-neutral)."""

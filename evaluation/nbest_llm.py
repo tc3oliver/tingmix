@@ -12,7 +12,6 @@ odd ones (held out), plus the N-best oracle."""
 from __future__ import annotations
 
 import argparse
-import collections
 import json
 import os
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
@@ -34,7 +33,6 @@ def _init(logits, lm_path):
     itos = json.loads((d / "tok.json").read_text())["itos"]
     _G["tok"] = Tok(itos, (d / "tok.sp").read_bytes() or None)
     _G["units"], _G["lm"], _G["V"] = lm_units(itos), CharLM.load(lm_path) if lm_path else ZeroLM(), len(itos)
-
 
 
 def _job(job):
@@ -79,7 +77,10 @@ def _lp(prompts, a):
     req = urllib.request.Request(a.url + "/completions", body, {"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=300) as r:
         d = json.load(r)
-    return [[next(iter(x.values()))["logprob"] if x else 0.0 for x in c["prompt_logprobs"]] for c in sorted(d["choices"], key=lambda c: c["index"])]
+    return [
+        [next(iter(x.values()))["logprob"] if x else 0.0 for x in c["prompt_logprobs"]]
+        for c in sorted(d["choices"], key=lambda c: c["index"])
+    ]
 
 
 def _rate(data, pick, part):
@@ -124,8 +125,21 @@ def tune(a):
     print("held-out", {k: round(v, 4) for k, v in held.items()})
     if a.out:
         base = [_rate(data, lambda nb, ref: nb[0]["text"], part) for part in (0, 1)]
-        Path(a.out).write_text(json.dumps({"lam": lam, "mu": mu, "tune": r, "held_out": held, "beam_tune": base[0], "beam_held_out": base[1],
-                                           "held_out_score": tot(held), "beam_held_out_score": tot(base[1])}, indent=1))
+        Path(a.out).write_text(
+            json.dumps(
+                {
+                    "lam": lam,
+                    "mu": mu,
+                    "tune": r,
+                    "held_out": held,
+                    "beam_tune": base[0],
+                    "beam_held_out": base[1],
+                    "held_out_score": tot(held),
+                    "beam_held_out_score": tot(base[1]),
+                },
+                indent=1,
+            )
+        )
 
 
 def main(argv=None):

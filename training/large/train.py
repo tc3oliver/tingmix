@@ -116,7 +116,9 @@ def sha_files(paths):
 
 def code_hash():
     root = Path(__file__).resolve().parents[2]
-    files = sorted([*root.glob("training/large/*.py"), root / "src/tingmix/models/large/encoder.py", root / "src/tingmix/models/large/attention.py"])
+    files = sorted(
+        [*root.glob("training/large/*.py"), root / "src/tingmix/models/large/encoder.py", root / "src/tingmix/models/large/attention.py"]
+    )
     return hashlib.sha256(b"".join(f.read_bytes() for f in files)).hexdigest()[:16]
 
 

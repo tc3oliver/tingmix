@@ -13,7 +13,13 @@ class EnergyVAD:
     ponytail: energy only; a neural VAD (e.g. Silero) handles non-stationary noise (music, keyboard) better."""
 
     def __init__(
-        self, threshold_db: float = -50.0, frame_ms: int = 20, start_frames: int = 2, hang_frames: int = 10, margin_db: float = 10.0, rise_db: float = 0.05
+        self,
+        threshold_db: float = -50.0,
+        frame_ms: int = 20,
+        start_frames: int = 2,
+        hang_frames: int = 10,
+        margin_db: float = 10.0,
+        rise_db: float = 0.05,
     ):
         self.threshold_db, self.frame_ms = threshold_db, frame_ms
         self.start_frames, self.hang_frames = start_frames, hang_frames
