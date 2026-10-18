@@ -11,7 +11,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from common import FEATURES, environment, no_overlap, require_mps, resolve_release, write_json
 from embed2asr.ctc import ctc_min_len
 from embed2asr.metrics import corpus
@@ -126,7 +125,8 @@ def verify_conditions(feature_root, train_sets, dev_sets):
     for split, groups in (("train", train_sets), ("dev", dev_sets)):
         base = index_rows(feature_root / "base", split, groups)
         adapted = index_rows(feature_root / "adapted", split, groups)
-        key = lambda rs: [(r["set"], r["id"], r["text"], r.get("lang"), r["frames"]) for r in rs]
+        def key(rs):
+            return [(r["set"], r["id"], r["text"], r.get("lang"), r["frames"]) for r in rs]
         if key(base) != key(adapted):
             raise RuntimeError(f"{split} base/adapted manifests differ")
     return True
