@@ -1,4 +1,5 @@
 """Phase 2: fair layer-wise frozen-feature Linear CTC probes. No dev/test training and no CPU fallback."""
+
 from __future__ import annotations
 
 import argparse
@@ -59,6 +60,7 @@ def eligible(rows, tok):
 
 class LinearCTC(nn.Module):
     """Identical layer norm (zero parameters) and one linear output layer for every 1024-d state."""
+
     def __init__(self, dim, vocab):
         super().__init__()
         self.linear = nn.Linear(dim, vocab)
@@ -114,19 +116,34 @@ def train_one(layer, train_rows, dev_rows, tok, epochs, lr, seed, out, device, d
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
         raise FileExistsError(out)
-    torch.save({"state_dict": {k: v.cpu() for k, v in head.state_dict().items()},
-                "layer": layer, "seed": seed, "dim": dim, "epochs": epochs,
-                "vocab_size": len(tok.itos)}, out)
-    return {"parameter_count": sum(p.numel() for p in head.parameters()), "history": history,
-            "dev": sets, "checkpoint": str(out.resolve()), "device": str(device)}
+    torch.save(
+        {
+            "state_dict": {k: v.cpu() for k, v in head.state_dict().items()},
+            "layer": layer,
+            "seed": seed,
+            "dim": dim,
+            "epochs": epochs,
+            "vocab_size": len(tok.itos),
+        },
+        out,
+    )
+    return {
+        "parameter_count": sum(p.numel() for p in head.parameters()),
+        "history": history,
+        "dev": sets,
+        "checkpoint": str(out.resolve()),
+        "device": str(device),
+    }
 
 
 def verify_conditions(feature_root, train_sets, dev_sets):
     for split, groups in (("train", train_sets), ("dev", dev_sets)):
         base = index_rows(feature_root / "base", split, groups)
         adapted = index_rows(feature_root / "adapted", split, groups)
+
         def key(rs):
             return [(r["set"], r["id"], r["text"], r.get("lang"), r["frames"]) for r in rs]
+
         if key(base) != key(adapted):
             raise RuntimeError(f"{split} base/adapted manifests differ")
     return True
@@ -142,9 +159,16 @@ def main():
     p.add_argument("--seed", type=int, default=1337)
     p.add_argument("--out", type=Path, default=Path("research/encoder-depth-m4/runs/probes"))
     a = p.parse_args()
-    result = {"phase": "linear_probe", "status": "BLOCKED", "environment": environment(),
-              "seed": a.seed, "epochs": a.epochs, "lr": a.lr,
-              "scope": "frozen_cached_features_linear_CTC_no_reader", "results": {}}
+    result = {
+        "phase": "linear_probe",
+        "status": "BLOCKED",
+        "environment": environment(),
+        "seed": a.seed,
+        "epochs": a.epochs,
+        "lr": a.lr,
+        "scope": "frozen_cached_features_linear_CTC_no_reader",
+        "results": {},
+    }
     try:
         device = require_mps()
         if a.epochs <= 0:
@@ -168,8 +192,7 @@ def main():
         dev, rej_dev = eligible(raw_dev, tok)
         if not train or not dev:
             raise RuntimeError("No valid train/dev samples; dev must never substitute for train")
-        result["counts"] = {"train": len(train), "dev": len(dev),
-                             "invalid_train": rej_train, "invalid_dev": rej_dev}
+        result["counts"] = {"train": len(train), "dev": len(dev), "invalid_train": rej_train, "invalid_dev": rej_dev}
         for variant in ("base", "adapted"):
             rows_tr = index_rows(a.features / variant, "train", a.train_sets)
             rows_dv = index_rows(a.features / variant, "dev", list(dev_specs))
@@ -186,13 +209,15 @@ def main():
             for layer in FEATURES:
                 key = f"{variant}/{layer}"
                 checkpoint = a.out / variant / f"{layer.replace('-', '_')}-seed{a.seed}.pt"
-                result["results"][key] = train_one(layer, rows_tr, rows_dv, tok, a.epochs, a.lr,
-                                                   a.seed, checkpoint, device, dev_specs)
+                result["results"][key] = train_one(layer, rows_tr, rows_dv, tok, a.epochs, a.lr, a.seed, checkpoint, device, dev_specs)
                 write_json(a.out / "results.json", result)
         result["status"] = "PASS"
-        result["known_limits"] = ["single seed", "no near-duplicate acoustic audit",
-                                 "linear probes not equivalent to 22.2M GRU reader",
-                                 "L12-Proj has a different parameter budget"]
+        result["known_limits"] = [
+            "single seed",
+            "no near-duplicate acoustic audit",
+            "linear probes not equivalent to 22.2M GRU reader",
+            "L12-Proj has a different parameter budget",
+        ]
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
         result["traceback"] = traceback.format_exc()
