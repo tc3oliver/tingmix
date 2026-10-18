@@ -1,4 +1,7 @@
-"""Phase 1: save FP32 intermediate states from the same full forward for base and ASR-adapted towers."""
+"""Phase 1: save intermediate encoder states for base and ASR-adapted towers from one shared mel per utterance.
+
+Per (variant, set, split): one float16 array per layer, rows = valid frames of all utterances concatenated, plus index.json
+(offsets, ids, texts). float16 is a storage format only (round-trip error is measured and recorded; the probe computes in fp32)."""
 
 from __future__ import annotations
 
@@ -8,64 +11,107 @@ import traceback
 from pathlib import Path
 
 import numpy as np
-from common import FEATURES, environment, load_adapted, load_base, mel_input, no_overlap, read_manifest, sample_key, stages, write_json
+from common import FEATURES, environment, load_adapted, load_base, mel_input, no_overlap, read_manifest, stages, write_json
+
+SPLITS = ("train", "dev", "test")
+NAMES = ("CV", "FLEURS", "ASCEND")
 
 
-def specs(values):
-    out = {}
-    for spec in values:
-        name, path = spec.split("=", 1)
-        if name in out:
-            raise ValueError(f"Duplicate dataset {name}")
-        out[name] = Path(path)
-    return out
+def layer_file(layer):
+    return layer.replace("-", "_") + ".npy"
 
 
-def extract_set(tower, fe, rows, variant, split, name, root):
+def extract_set(towers, fe, rows, name, split, root):
+    """Both towers see the identical mel, so base/adapted differ only by the LoRA delta."""
     from embed2asr.audio import load_audio
 
-    folder = root / variant / split / name
-    folder.mkdir(parents=True, exist_ok=True)
+    buf = {v: {k: [] for k in FEATURES} for v in towers}
+    err = {v: {k: [0.0, 0.0] for k in FEATURES} for v in towers}
     index = []
     for r in rows:
-        key = sample_key(r)
-        path = folder / f"{key}.npz"
-        if path.exists():
-            raise FileExistsError(f"Refusing to overwrite existing feature: {path}")
         wav = load_audio(r["audio"])
         if len(wav) / 16000 > 29.5:
             raise ValueError(f"Clip longer than the official 29.5 s window: {r['audio']}")
         mel, mask = mel_input(wav, fe)
-        h, lengths = stages(tower, mel, mask)
-        n = int(lengths.item())
-        if n <= 0:
-            raise RuntimeError(f"No valid frames in {r['audio']}")
-        tensors = {k.replace("-", "_"): v[0, :n].detach().float().cpu().numpy() for k, v in h.items()}
-        np.savez_compressed(path, **tensors)
+        frames = None
+        for variant, tower in towers.items():
+            h, lengths = stages(tower, mel, mask)
+            n = int(lengths.item())
+            if n <= 0 or (frames is not None and n != frames):
+                raise RuntimeError(f"Invalid or inconsistent frame count {n} for {r['audio']}")
+            frames = n
+            for k, v in h.items():
+                x = v[0, :n].float().cpu().numpy()
+                if not np.isfinite(x).all() or np.abs(x).max() > 6e4:
+                    raise RuntimeError(f"{variant}/{k} not representable in float16 for {r['audio']}")
+                x16 = x.astype(np.float16)
+                err[variant][k][0] += float(((x - x16.astype(np.float32)) ** 2).sum())
+                err[variant][k][1] += float((x**2).sum())
+                buf[variant][k].append(x16)
         index.append(
             {
-                "id": key,
-                "feature": str(path.resolve()),
+                "id": r["sha256"][:24],
                 "text": r["text"],
-                "lang": r.get("lang"),
-                "audio": str(Path(r["audio"]).resolve()),
-                "seconds": len(wav) / 16000,
-                "frames": n,
+                "lang": r["lang"],
+                "set": name,
+                "seconds": r["seconds"],
+                "frames": frames,
+                "speaker": r.get("speaker"),
+                "language": r.get("language"),
+                "sha256": r["sha256"],
             }
         )
-    with (folder / "index.jsonl").open("x", encoding="utf-8") as f:
-        for row in index:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    return {"samples": len(index), "index": str((folder / "index.jsonl").resolve())}
+    offsets = np.cumsum([0] + [i["frames"] for i in index]).tolist()
+    for variant in towers:
+        folder = root / variant / f"{name}-{split}"
+        folder.mkdir(parents=True, exist_ok=False)
+        for k in FEATURES:
+            np.save(folder / layer_file(k), np.concatenate(buf[variant][k]))
+        (folder / "index.json").write_text(json.dumps({"offsets": offsets, "rows": index}, ensure_ascii=False), encoding="utf-8")
+    return {
+        "utterances": len(index),
+        "frames": offsets[-1],
+        "fp16_roundtrip_rel_l2": {v: {k: (e[0] / max(e[1], 1e-30)) ** 0.5 for k, e in err[v].items()} for v in towers},
+    }
+
+
+def pooled(root, variant, name, split, layer="L6"):
+    x = np.load(root / variant / f"{name}-{split}" / layer_file(layer), mmap_mode="r")
+    off = json.loads((root / variant / f"{name}-{split}" / "index.json").read_text())["offsets"]
+    return np.stack([np.asarray(x[a:b], dtype=np.float32).mean(0) for a, b in zip(off[:-1], off[1:])])
+
+
+def acoustic_neighbour_audit(root, names, threshold=0.98):
+    """Mean-pooled (globally centred) L6 states: cosine of every dev/test utterance to its nearest train utterance.
+    A re-encoded or cropped copy of a train clip would sit near 1.0; genuinely different utterances do not."""
+    out = {}
+    for name in names:
+        train = pooled(root, "base", name, "train")
+        mu = train.mean(0)
+        unit = lambda a: (a - mu) / np.linalg.norm(a - mu, axis=1, keepdims=True)  # noqa: E731
+        t = unit(train)
+        # reference scale: nearest *other* train utterance
+        s = t @ t.T
+        np.fill_diagonal(s, -1)
+        out[f"{name}/train_vs_train"] = {"nn_cos_p50": float(np.median(s.max(1))), "nn_cos_max": float(s.max())}
+        for split in ("dev", "test"):
+            sim = unit(pooled(root, "base", name, split)) @ t.T
+            nn = sim.max(1)
+            out[f"{name}/{split}_vs_train"] = {
+                "nn_cos_p50": float(np.median(nn)),
+                "nn_cos_p99": float(np.percentile(nn, 99)),
+                "nn_cos_max": float(nn.max()),
+                f"n_above_{threshold}": int((nn > threshold).sum()),
+            }
+    return out
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--train-set", action="append", default=[], metavar="NAME=MANIFEST")
-    p.add_argument("--dev-set", action="append", default=[], metavar="NAME=MANIFEST")
+    p.add_argument("--manifests", type=Path, default=Path("research/encoder-depth-m4/runs/manifests"))
     p.add_argument("--revision", help="released TingMix-Large HF commit")
     p.add_argument("--parity", type=Path, default=Path("research/encoder-depth-m4/runs/parity.json"))
-    p.add_argument("--limit", type=int, default=0, help="smoke subset; disallow release-level conclusions")
+    p.add_argument("--limit", type=int, default=0, help="smoke subset per set/split; results are exploratory only")
     p.add_argument("--out", type=Path, default=Path("research/encoder-depth-m4/runs/features"))
     a = p.parse_args()
     result = {
@@ -74,18 +120,14 @@ def main():
         "environment": environment(),
         "sets": {},
         "limit": a.limit,
-        "variants": ("base", "adapted"),
+        "variants": ["base", "adapted"],
     }
     try:
-        tr, dv = specs(a.train_set), specs(a.dev_set)
-        if not tr and not dv:
-            raise ValueError("At least one train/dev manifest is required")
-        train = {k: read_manifest(v) for k, v in tr.items()}
-        dev = {k: read_manifest(v) for k, v in dv.items()}
-        if train and dev:
-            result["overlap"] = no_overlap([r for rs in train.values() for r in rs], [r for rs in dev.values() for r in rs])
-        else:
-            result["overlap"] = {"exact_duplicates": "NOT_CHECKED", "near_duplicate_audit": "NOT_VERIFIED"}
+        data = {(n, s): read_manifest(a.manifests / f"{n}-{s}.jsonl") for n in NAMES for s in SPLITS}
+        for n in NAMES:  # exact audio-byte / path leakage between splits is a hard error
+            no_overlap(data[n, "train"], data[n, "dev"] + data[n, "test"])
+            no_overlap(data[n, "dev"], data[n, "test"])
+        result["overlap"] = {"exact_duplicates": 0, "acoustic_audit": "see nn_audit"}
         parity = json.loads(a.parity.read_text(encoding="utf-8"))
         if parity.get("status") != "PASS":
             raise RuntimeError("MPS parity did not pass; feature extraction is blocked")
@@ -93,16 +135,16 @@ def main():
         if origin["hf_revision"] != parity["origin"]["hf_revision"] or origin["delta_sha256"] != parity["origin"]["delta_sha256"]:
             raise RuntimeError("Feature extraction release differs from MPS parity release")
         result["origin"] = origin
+        towers = {"base": load_base(), "adapted": model.asr.encoder.tower}
         fe = model.asr.encoder.feature_extractor
-        towers = {"adapted": model.asr.encoder.tower, "base": load_base()}
-        for variant, tower in towers.items():
-            for split, groups in (("train", train), ("dev", dev)):
-                for name, rows in groups.items():
-                    rs = rows[: a.limit] if a.limit else rows
-                    result["sets"][f"{variant}/{split}/{name}"] = extract_set(tower, fe, rs, variant, split, name, a.out)
+        for (name, split), rows in data.items():
+            rows = rows[: a.limit] if a.limit else rows
+            result["sets"][f"{name}/{split}"] = extract_set(towers, fe, rows, name, split, a.out)
+            print(f"{name}/{split}: {len(rows)} utterances", flush=True)
+        result["nn_audit"] = acoustic_neighbour_audit(a.out, NAMES)
         result["status"] = "PASS"
         result["layers"] = list(FEATURES)
-        result["storage_dtype"] = "float32"
+        result["storage_dtype"] = "float16 (probe computes in fp32)"
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
         result["traceback"] = traceback.format_exc()

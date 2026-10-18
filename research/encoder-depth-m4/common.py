@@ -83,7 +83,13 @@ def resolve_release(revision=None):
 
     info = HfApi().model_info(REPO, revision=revision)
     sha = info.sha
-    path = Path(snapshot_download(REPO, revision=sha))
+    path = Path(snapshot_download(REPO, revision=sha, ignore_patterns=["lm/*"]))  # the n-gram LM is not used here
+    for line in (path / "SHA256SUMS").read_text().splitlines():
+        if not line.strip():
+            continue
+        digest, name = line.split(maxsplit=1)
+        if sha256(path / name.strip()) != digest:
+            raise RuntimeError(f"RELEASE_MISMATCH: {name} does not match SHA256SUMS")
     meta_file = path / "tingmix.json"
     if not meta_file.is_file():
         raise RuntimeError(f"RELEASE_MISMATCH: {REPO}@{sha} has no tingmix.json; refusing base Embed2ASR-v1")
@@ -103,13 +109,14 @@ def resolve_release(revision=None):
     }
 
 
-def load_adapted(revision=None):
-    """Load *published* Reader/tokenizer/encoder + complete delta. Fail on incomplete LoRA."""
+def load_adapted(revision=None, device="mps"):
+    """Load *published* Reader/tokenizer/encoder + complete delta. Fail on incomplete LoRA.
+    device="cpu" is only for the fp32 reference side of the parity check; every measurement uses MPS."""
     from safetensors import safe_open
 
     from tingmix.models.large.model import LargeModel
 
-    device = require_mps()
+    device = require_mps() if device == "mps" else torch.device(device)
     path, origin = resolve_release(revision)
     model = LargeModel.from_pretrained(str(path), device=str(device), encoder_revision=E.ENCODER_REVISION)
     tower = model.asr.encoder.tower
@@ -142,6 +149,15 @@ def load_adapted(revision=None):
     return model, origin
 
 
+def read_tokenizer(release_path):
+    from embed2asr.tokenizer import Tok
+
+    cfg = json.loads((release_path / "config.json").read_text(encoding="utf-8"))
+    units = json.loads((release_path / cfg["tokenizer"]["units"]).read_text(encoding="utf-8"))
+    sp_name = cfg["tokenizer"].get("sentencepiece")
+    return Tok(units, (release_path / sp_name).read_bytes() if sp_name else None)
+
+
 def load_base():
     device = require_mps()
     tower = E.load_tower(revision=E.ENCODER_REVISION, dtype=torch.float32).to(device).eval()
@@ -151,11 +167,11 @@ def load_base():
     return tower
 
 
-def mel_input(wav, feature_extractor):
+def mel_input(wav, feature_extractor, device="mps"):
     if wav.dtype != np.float32 or wav.ndim != 1:
         raise ValueError("Expected mono float32 16 kHz")
     inp = feature_extractor([wav], sampling_rate=16000, return_tensors="pt")
-    device = require_mps()
+    device = require_mps() if device == "mps" else torch.device(device)
     return inp["input_features"].to(device=device, dtype=torch.float32), inp["input_features_mask"].to(device=device)
 
 
@@ -186,9 +202,9 @@ def early(tower, mel, mask, depth):
     return E.run_layers(tower, h, lens, 0, depth, proj=depth == 12), lens
 
 
-def executed_params(tower, depth):
+def executed_params(tower, depth, proj):
     modules = [tower.subsample_conv_projection, *list(tower.layers[:depth])]
-    if depth == 12:
+    if proj:
         modules.append(tower.output_proj)
     return sum(p.numel() for module in modules for p in module.parameters())
 

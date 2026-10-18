@@ -8,10 +8,45 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from common import environment, load_adapted, mel_input, stages, sync, write_json
+from common import FEATURES, environment, load_adapted, load_base, mel_input, stages, sync, write_json
 
 
-def run(wav, model):
+def rel_l2(a, b):
+    return ((a.float().cpu() - b.float().cpu()).norm() / b.float().cpu().norm().clamp_min(1e-9)).item()
+
+
+def audit_lora(tower):
+    """Every one of the 12 layers must carry non-trivial LoRA tensors, and nothing may sit off-device or off-dtype."""
+    layers = []
+    for i, layer in enumerate(tower.layers):
+        a = [p for n, p in layer.named_parameters() if n.endswith(".lora_a")]
+        b = [p for n, p in layer.named_parameters() if n.endswith(".lora_b")]
+        if not a or len(a) != len(b) or any(float(x.norm()) == 0.0 for x in b):
+            raise AssertionError(f"LoRA missing or zero on layer {i + 1}")
+        layers.append({"layer": i + 1, "modules": len(a), "lora_b_norm": float(sum(float(x.norm()) ** 2 for x in b) ** 0.5)})
+    bad = {(p.device.type, str(p.dtype)) for p in tower.parameters()} - {("mps", "torch.float32")}
+    if bad:
+        raise AssertionError(f"Device/dtype mismatch in encoder parameters: {sorted(bad)}")
+    return layers
+
+
+@torch.inference_mode(False)
+@torch.enable_grad()
+def mps_ctc_backward(vocab):
+    """CTC loss forward+backward on MPS with CPU fallback disabled (the probe depends on it)."""
+    x = torch.randn(1, 50, 64, device="mps", requires_grad=True)
+    head = torch.nn.Linear(64, vocab).to("mps")
+    logp = head(x)[0].log_softmax(-1)[:, None, :]
+    target = torch.randint(1, vocab, (12,), device="mps")
+    loss = torch.nn.functional.ctc_loss(logp, target, torch.tensor([50], device="mps"), torch.tensor([12], device="mps"), blank=0)
+    loss.backward()
+    sync()
+    if not (torch.isfinite(loss).item() and torch.isfinite(head.weight.grad).all().item() and head.weight.grad.abs().sum().item() > 0):
+        raise AssertionError("MPS CTC loss/backward produced nonfinite or zero gradients")
+    return {"loss": loss.item(), "grad_abs_sum": head.weight.grad.abs().sum().item()}
+
+
+def run(wav, model, cpu_model, base_tower):
     asr = model.asr
     tower = asr.encoder.tower
     mel, mask = mel_input(wav, asr.encoder.feature_extractor)
@@ -41,7 +76,32 @@ def run(wav, model):
         if greedy != official_greedy:
             raise AssertionError(f"Greedy transcript mismatch: {greedy!r} != {official_greedy!r}")
         sync()
+        lora = audit_lora(tower)
+        base_h, _ = stages(base_tower, mel, mask)
+        lora_effect = {k: rel_l2(h[k], base_h[k]) for k in FEATURES}
+        if min(lora_effect.values()) <= 1e-6:
+            raise AssertionError(f"LoRA has no effect on some stage: {lora_effect}")
+        cpu_tower = cpu_model.asr.encoder.tower
+        cmel, cmask = mel_input(wav, cpu_model.asr.encoder.feature_extractor, device="cpu")
+        cpu_h, cpu_lens = stages(cpu_tower, cmel, cmask)
+        if not torch.equal(cpu_lens, lens.cpu()):
+            raise AssertionError("CPU/MPS frame lengths differ")
+        vs_cpu = {k: rel_l2(h[k], cpu_h[k]) for k in FEATURES}
+        if max(vs_cpu.values()) > 0.01:
+            raise AssertionError(f"MPS vs CPU fp32 stage mismatch: {vs_cpu}")
+        cpu_logits = cpu_model.asr.reader(cpu_h["L12-Proj"].float(), cpu_lens)
+        logit_diff = (logits.float().cpu() - cpu_logits).abs().max().item()
+        cpu_greedy = cpu_model.asr.decode(cpu_logits, cpu_lens, cpu_model.asr.tok)[0]
+        if cpu_greedy != greedy:
+            raise AssertionError(f"MPS vs CPU transcript mismatch: {greedy!r} != {cpu_greedy!r}")
+        ctc = mps_ctc_backward(len(asr.tok.itos))
     return {
+        "lora_layers": lora,
+        "lora_effect_vs_base_rel_l2": lora_effect,
+        "mps_vs_cpu_fp32_rel_l2": vs_cpu,
+        "mps_vs_cpu_logit_max_abs": logit_diff,
+        "cpu_greedy": cpu_greedy,
+        "mps_ctc_backward": ctc,
         "status": "PASS",
         "feature_shape": list(custom.shape),
         "lengths": lens.cpu().tolist(),
@@ -74,7 +134,7 @@ def main():
             result["audio"] = {"kind": "synthetic", "seconds": 3, "seed": 17}
         model, origin = load_adapted(a.revision)
         result["origin"] = origin
-        result.update(run(wav, model))
+        result.update(run(wav, model, load_adapted(a.revision or origin["hf_revision"], device="cpu")[0], load_base()))
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
         result["traceback"] = traceback.format_exc()

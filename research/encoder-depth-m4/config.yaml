@@ -1,6 +1,6 @@
 # Research-only configuration. Scripts use these explicit CLI equivalents; no production config changes.
 study: tingmix-large-encoder-depth-m4
-status: not_run
+status: measured_on_m4
 hardware: Mac Studio M4 Max 64GB
 device: mps
 allow_cpu_fallback: false
@@ -25,28 +25,28 @@ latency:
   iterations: 50
   synchronization: torch.mps.synchronize
 linear_probe:
-  seed: 1337
-  epochs: 8
-  learning_rate: 0.0003
+  seeds: [1337, 1338, 1339]
+  epochs: 20
+  batch_size: 16
+  learning_rate: 0.003   # chosen once on pooled dev CTC from {1e-3, 3e-3, 1e-2} (6-epoch pilot), shared by every condition
   optimizer: AdamW
   weight_decay: 0.01
+  schedule: 5pct_warmup_then_cosine
   head: layer_norm_no_params_then_linear_ctc
   same_features_and_targets: true
   ctc_blank: 0
   zero_infinity: false
 datasets:
-  train: []     # local legal JSONL manifests; never commit
-  dev: []       # local legal JSONL manifests; never commit
-  test: forbidden
-  required_dev_sets:
-    CV: CER
-    FLEURS: WER
-    ASCEND: MER
-  near_duplicate_check: requires_separate_audio_similarity_audit
-  normalization: existing_embed2asr_metrics
+  CV: {hf: fsicoli/common_voice_22_0, revision: ae911de250fe9375d08e2daa2105b671d659d446, license: cc0-1.0, metric: CER, sizes: [2000, 200, 500]}
+  FLEURS: {hf: google/fleurs, revision: 70bb2e84b976b7e960aa89f1c648e09c59f894dd, license: cc-by-4.0, metric: WER, sizes: [1000, 200, 400]}
+  ASCEND: {hf: CAiRE/ASCEND, revision: 737e9800ae31be9932ba8464c80366559bd28424, license: cc-by-sa-4.0, metric: MER, sizes: [3000, 300, 600]}
+  sampling_seed: 1337
+  near_duplicate_check: pooled_L6_cosine_nn_threshold_0.98
+  test: scored_once_after_dev_lr_choice
+  normalization: embed2asr_numnorm_then_norm
 decision:
   go_probe_relative_error_threshold: 0.05
   go_encoder_p50_improvement_threshold: 0.15
   requires_cross_language_no_material_regression: true
-  minimum_evidence: representative_independent_dev_and_repeatability
+  minimum_evidence: 3_seeds_bootstrap_ci_clean_splits
   these_are_preregistered_research_gate_not_release_gate: true
