@@ -11,7 +11,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-
 from common import early, environment, executed_params, load_adapted, mel_input, require_mps, sync, write_json
 
 
