@@ -1,0 +1,29 @@
+{
+  "study": "tingmix-large-encoder-depth-m4",
+  "date": "2026-10-18",
+  "status": "NOT_RUN_ON_M4",
+  "platform_in_current_chat": "Linux x86_64 PyTorch CPU; not user's Mac Studio",
+  "model_release": "tc3oliver/TingMix-Large",
+  "encoder_revision": "914f7f89142e33e77833254d9c9b90c3cef7303b",
+  "mps_parity": {
+    "status": "NOT_RUN"
+  },
+  "feature_extraction": {
+    "status": "NOT_RUN"
+  },
+  "latency": {
+    "status": "NOT_RUN"
+  },
+  "linear_probes": {
+    "status": "BLOCKED",
+    "reason": "No MPS access or legal local train/dev manifests"
+  },
+  "asr_accuracy": {
+    "status": "NOT_MEASURED"
+  },
+  "peak_memory": {
+    "status": "NOT_MEASURED"
+  },
+  "decision": "INVESTIGATE",
+  "decision_basis": "Insufficient MPS parity, speed and independent multi-language probe measurements"
+}
