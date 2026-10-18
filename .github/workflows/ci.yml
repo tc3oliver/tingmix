@@ -26,6 +26,7 @@ jobs:
           python -m pip install -e ".[dev,server,train]"
       - name: ruff
         run: |
+          ruff format --diff research/encoder-depth-m4 || true
           ruff check .
           ruff format --check .
       - name: pytest (fast; slow tests need the real encoder, private data or a GPU)
