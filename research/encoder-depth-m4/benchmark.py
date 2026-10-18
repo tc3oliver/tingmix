@@ -1,4 +1,5 @@
 """Phase 3: synchronize each actual MPS early-exit forward; never benchmark feature-cache reads."""
+
 from __future__ import annotations
 
 import argparse
@@ -35,14 +36,20 @@ def measure(fn, n, warmup, gpu):
         if gpu:
             sync()
         samples.append((time.perf_counter() - t) * 1000)
-    return {"p50_ms": percentile(samples, 0.50), "p95_ms": percentile(samples, 0.95),
-            "min_ms": min(samples), "mean_ms": statistics.mean(samples),
-            "n": len(samples), "warmup": warmup}
+    return {
+        "p50_ms": percentile(samples, 0.50),
+        "p95_ms": percentile(samples, 0.95),
+        "min_ms": min(samples),
+        "mean_ms": statistics.mean(samples),
+        "n": len(samples),
+        "warmup": warmup,
+    }
 
 
 def waveform(duration, input_path=None):
     if input_path:
         from embed2asr.audio import load_audio
+
         w = load_audio(input_path)
         if len(w) < duration * 16000:
             raise ValueError(f"Audio file must contain >= {duration} seconds of speech")
@@ -61,9 +68,17 @@ def main():
     p.add_argument("--warmup", type=int, default=6)
     p.add_argument("--out", type=Path, default=Path("research/encoder-depth-m4/runs/latency.json"))
     a = p.parse_args()
-    res = {"phase": "latency", "status": "BLOCKED", "environment": environment(),
-           "device": "mps", "precision": "fp32", "batch_size": 1, "feature_cache": False,
-           "durations_s": [5, 15, 25], "measures": {}}
+    res = {
+        "phase": "latency",
+        "status": "BLOCKED",
+        "environment": environment(),
+        "device": "mps",
+        "precision": "fp32",
+        "batch_size": 1,
+        "feature_cache": False,
+        "durations_s": [5, 15, 25],
+        "measures": {},
+    }
     try:
         require_mps()
         parity = json.loads(a.parity.read_text(encoding="utf-8"))
@@ -81,22 +96,31 @@ def main():
         res["mps_allocated_bytes_start"] = torch.mps.current_allocated_memory()
         for secs in res["durations_s"]:
             wav, kind = waveform(secs, a.audio)
+
             def inp():
                 return fe([wav], sampling_rate=16000, return_tensors="pt")
+
             prep = measure(inp, a.iterations, a.warmup, gpu=False)
             mel, mask = mel_input(wav, fe)
             for depth in (6, 9, 12):
+
                 def f():
                     return early(tower, mel, mask, depth)
+
                 with torch.inference_mode():
                     r = measure(f, a.iterations, a.warmup, gpu=True)
                     y, lens = f()
                     sync()
                 key = f"E{depth}/{secs}s"
-                r.update(rtf=r["p50_ms"] / (secs * 1000), executed_parameters=executed_params(tower, depth),
-                         output_shape=list(y.shape), output_frames=int(lens.item()),
-                         includes_projection=(depth == 12), audio_kind=kind,
-                         scope="mel_to_hidden_includes_subsample_and_active_layers")
+                r.update(
+                    rtf=r["p50_ms"] / (secs * 1000),
+                    executed_parameters=executed_params(tower, depth),
+                    output_shape=list(y.shape),
+                    output_frames=int(lens.item()),
+                    includes_projection=(depth == 12),
+                    audio_kind=kind,
+                    scope="mel_to_hidden_includes_subsample_and_active_layers",
+                )
                 res["measures"][key] = r
             e2e = measure(lambda: model.transcribe_batch([wav]), a.iterations, a.warmup, gpu=True)
             e2e["scope"] = "file_waveform_to_official_reader_greedy_decode"
