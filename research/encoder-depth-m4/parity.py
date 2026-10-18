@@ -7,7 +7,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-
 from common import environment, load_adapted, mel_input, stages, sync, write_json
 
 
