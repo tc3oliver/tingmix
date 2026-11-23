@@ -79,5 +79,6 @@ code-switching; the metrics are never averaged together.
 
 ## License
 
-Code: Apache-2.0. Model weights carry the terms of their base model and training data; see the Hugging Face model
-card of each release and [docs/licensing.md](docs/licensing.md).
+Code: Apache-2.0. Model weights: Apache-2.0, as declared on the Hugging Face model card of each release. TingMix-Large
+needs `google/embeddinggemma-2`, which is not included and is used under Google's terms. Training data sources and
+attribution: [docs/licensing.md](docs/licensing.md).

@@ -37,7 +37,8 @@ remains well behind Whisper large-v3.
 
 ## Licence review
 
-- Parliament speech: CC BY-NC 4.0 — weights and the Parliament-derived LM are likely non-commercial.
-- ASCEND: CC BY-SA 4.0 — attribution; conservative reading: ShareAlike for derived weights/LM.
+- Parliament speech: CC BY-NC 4.0. The maintainer's position (docs/licensing.md): dataset licences govern redistribution
+  of the data, which TingMix does not do; the weights and the LM are published under Apache-2.0.
+- ASCEND: CC BY-SA 4.0. Attribution in docs/licensing.md; audio and transcripts are not redistributed.
 - People's Speech / AMI / FLEURS: CC BY (attribution). Common Voice / VoxPopuli: CC0 (VoxPopuli audio: EP notice).
 - EmbeddingGemma 2: Google's terms and prohibited-use policy apply to any use of the encoder and its adapters.
