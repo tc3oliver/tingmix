@@ -15,7 +15,8 @@ emitted as a final, and its audio is dropped. Consequences:
 - a final can differ slightly from decoding the same clip offline (different padding / preroll; the encoder is not padding-invariant).
 
 TingMix-Small (CPU) is a natively stateful streaming model (`streaming_native = True`, `tingmix.models.small`): the session
-opens one stream per segment and feeds each chunk to it once, with no re-decoding.
+opens one stream per segment and feeds each chunk to it once; earlier audio is never re-encoded. With `--lm`, the final
+text is beam-searched over the segment's stored log-probs.
 
 ## Pipeline
 

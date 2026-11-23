@@ -11,7 +11,7 @@ authoritative copy). The released version is additionally fine-tuned with the NT
   pieces, 5,025 units), trained from scratch on frozen encoder features (Embed2ASR v0.1.0 trainer, 80 epochs).
 - Adaptation: LoRA (rank 16, alpha 32) on q/k/v/post and both feed-forward blocks of all 12 encoder layers
   (~5.5M parameters), trained jointly with the reader (encoder LR 1e-4, reader LR 2e-5, 12k-step cosine). A release
-  contains the LoRA delta + reader (tools/export_release.py), plus the attention decoder from v3, not the encoder.
+  contains the LoRA delta + reader (tools/export_release.py) and, from v3 on, the attention decoder; never the encoder.
 - Decoding: greedy CTC, or CTC prefix beam search with a character 5-gram LM (CJK units scored, English pieces
   LM-neutral).
 - Streaming: buffered re-decoding of the open speech segment (energy VAD, 600 ms endpoint). It is not a native

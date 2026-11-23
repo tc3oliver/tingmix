@@ -14,8 +14,8 @@ once and keep state, so its cost per second of audio is constant.
 - `ASRModel`: `name`, `sample_rate`, `max_window_s`, `streaming_native`, `transcribe_batch(wavs) -> texts` (offline use,
   shared with Large).
 - `StreamingASRModel.new_stream() -> Stream`; `Stream.accept(pcm) -> current hypothesis`, `Stream.finalize() -> final text`.
-  With `streaming_native = True` the session opens one stream per VAD segment, call `accept` on every chunk (partials
-  from its return value, stability from the same `StablePrefix`), and `finalize` at the endpoint (final event).
+  With `streaming_native = True` the session opens one stream per VAD segment, calls `accept` on every chunk (partials
+  from its return value, stability from the same `StablePrefix`), and calls `finalize` at the endpoint (final event).
   Events, revision numbers and the "final is immutable" rule are unchanged, so clients cannot tell Large from Small.
 
 ## Candidate model (considered before training)

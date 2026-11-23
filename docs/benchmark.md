@@ -98,8 +98,9 @@ Reproduce: `python -m evaluation.accuracy --model <release dir> --lm <lm> --lm-a
 
 ## Caveats
 
-- This candidate never used NTUML2021 for training or model selection; for it, NTUML2021 is the unseen-domain
-  Taiwanese-accent code-switching test. Its licence is not stated; the released v2/v3 models use its train split only.
+- The earlier candidate never used NTUML2021 for training, the LM or model selection, so for it NTUML2021 is an
+  unseen-domain Taiwanese-accent code-switching test; v2 and v3 were trained on its train split, so for them it is
+  in-domain. Its licence is not stated; the released models use the train split only.
 - ASCEND speakers are from Hong Kong; Parliament references are not verbatim transcripts.
 - The LM includes Parliament (CC BY-NC 4.0) and ASCEND (CC BY-SA 4.0) text; the reader and adapters were trained on
   Parliament speech. See the licence review in [model-card-large.md](model-card-large.md) and [licensing.md](licensing.md).
