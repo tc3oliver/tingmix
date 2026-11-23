@@ -14,8 +14,8 @@ emitted as a final, and its audio is dropped. Consequences:
 - a segment forced to end at `max_segment_s` (default 25 s) can split a word;
 - a final can differ slightly from decoding the same clip offline (different padding / preroll; the encoder is not padding-invariant).
 
-TingMix-Small (CPU) is planned as a natively stateful streaming model (`streaming_native = True`): audio is consumed once, no
-re-decoding. Only the interface exists today (`tingmix.models.small`).
+TingMix-Small (CPU) is a natively stateful streaming model (`streaming_native = True`, `tingmix.models.small`): the session
+opens one stream per segment and feeds each chunk to it once, with no re-decoding.
 
 ## Pipeline
 
@@ -31,7 +31,7 @@ audio -> `RingBuffer` -> `EnergyVAD` (20 ms frames, hysteresis; any object with 
 | `silence_ms` | 600 | wait before a segment is finalized; lower = faster finals, more mid-sentence cuts |
 | `max_segment_s` | 25 | forced cut (capped below the model window minus preroll) |
 | `preroll_ms` / `tail_pad_ms` | 800 / 0 | audio kept before the detected onset / extra kept after the VAD's last speech frame (the 200 ms VAD hangover is kept anyway) |
-| `EnergyVAD(threshold_db)` | -50 dBFS | fixed threshold; no noise-floor tracking |
+| `EnergyVAD(threshold_db, margin_db)` | -50 dBFS, 10 dB | speech must be above `threshold_db` and `margin_db` above a tracked noise floor; `margin_db=0` = fixed threshold only |
 
 The defaults come from a sweep over preroll {300,500,800} ms x tail pad {0..700} ms x VAD threshold {-45,-50} dBFS on 100 Locked-Dev clips
 (50 ASCEND + 50 CV) plus a 61.7 s concatenated stream (all settings segmented it 13/13 and kept the Partial/Revision/Final order).

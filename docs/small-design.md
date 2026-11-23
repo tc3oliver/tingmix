@@ -1,4 +1,4 @@
-# TingMix-Small design (interface only; not trained yet)
+# TingMix-Small design (written before training)
 
 Goal: real-time Taiwanese Mandarin / English / code-switching ASR on a regular PC CPU, behind the same streaming API as
 TingMix-Large (`StreamingSession` events, WebSocket protocol, CLI).
@@ -14,11 +14,14 @@ once and keep state, so its cost per second of audio is constant.
 - `ASRModel`: `name`, `sample_rate`, `max_window_s`, `streaming_native`, `transcribe_batch(wavs) -> texts` (offline use,
   shared with Large).
 - `StreamingASRModel.new_stream() -> Stream`; `Stream.accept(pcm) -> current hypothesis`, `Stream.finalize() -> final text`.
-  With `streaming_native = True` the session will open one stream per VAD segment, call `accept` on every chunk (partials
+  With `streaming_native = True` the session opens one stream per VAD segment, call `accept` on every chunk (partials
   from its return value, stability from the same `StablePrefix`), and `finalize` at the endpoint (final event).
   Events, revision numbers and the "final is immutable" rule are unchanged, so clients cannot tell Large from Small.
 
-## Candidate model (to be decided with data, not now)
+## Candidate model (considered before training)
+
+The released model is a causal log-mel + strided conv + unidirectional GRU CTC network (`src/tingmix/models/small/model.py`).
+The options below were the starting point.
 
 - Chunked / causal conformer or Zipformer encoder with limited right context (e.g. 160-320 ms), CTC or transducer
   head, int8 ONNX on CPU; 20-80M parameters.
