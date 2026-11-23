@@ -11,7 +11,7 @@ authoritative copy). The released version is additionally fine-tuned with the NT
   pieces, 5,025 units), trained from scratch on frozen encoder features (Embed2ASR v0.1.0 trainer, 80 epochs).
 - Adaptation: LoRA (rank 16, alpha 32) on q/k/v/post and both feed-forward blocks of all 12 encoder layers
   (~5.5M parameters), trained jointly with the reader (encoder LR 1e-4, reader LR 2e-5, 12k-step cosine). A release
-  would contain the LoRA delta + reader (tools/export_release.py), not the encoder.
+  contains the LoRA delta + reader (tools/export_release.py) and, from v3 on, the attention decoder; never the encoder.
 - Decoding: greedy CTC, or CTC prefix beam search with a character 5-gram LM (CJK units scored, English pieces
   LM-neutral).
 - Streaming: buffered re-decoding of the open speech segment (energy VAD, 600 ms endpoint). It is not a native
@@ -30,13 +30,15 @@ Model selection and LM weights use development sets only. Test results are produ
 `evaluation/accuracy.py`, from one checkpoint, and reported per metric: CER (Taiwanese Mandarin), MER
 (code-switching: CJK characters + English words), WER (English). Results of the single test run: [benchmark.md](benchmark.md).
 
-Known limitations: NTUML2021 is evaluation-only (licence not stated); ASCEND speakers are from Hong Kong, so it is not a
+Known limitations: NTUML2021's licence is not stated; the released model uses its train split only and its test split
+for evaluation; ASCEND speakers are from Hong Kong, so it is not a
 Taiwanese-accent code-switch test; Parliament references are not verbatim (deletion/insertion floor); English accuracy
 remains well behind Whisper large-v3.
 
-## Licence review (to complete before any weight release)
+## Licence review
 
-- Parliament speech: CC BY-NC 4.0 — weights and the Parliament-derived LM are likely non-commercial.
-- ASCEND: CC BY-SA 4.0 — attribution; conservative reading: ShareAlike for derived weights/LM.
+- Parliament speech: CC BY-NC 4.0. The maintainer's position (docs/licensing.md): dataset licences govern redistribution
+  of the data, which TingMix does not do; the weights are published under Apache-2.0 (Hugging Face model card).
+- ASCEND: CC BY-SA 4.0. Attribution in docs/licensing.md; audio and transcripts are not redistributed.
 - People's Speech / AMI / FLEURS: CC BY (attribution). Common Voice / VoxPopuli: CC0 (VoxPopuli audio: EP notice).
 - EmbeddingGemma 2: Google's terms and prohibited-use policy apply to any use of the encoder and its adapters.

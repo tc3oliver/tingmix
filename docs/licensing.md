@@ -3,11 +3,12 @@
 Not legal advice. The maintainer's position: dataset licences govern redistribution of the data, which TingMix never
 does; trained weights and n-gram count tables are published as models. Sources are attributed below.
 
-| Artifact | Built from | Proposed terms | Status |
+| Artifact | Built from | Terms | Status |
 |---|---|---|---|
 | Source code (this repository) | — | Apache-2.0 | published |
 | TingMix-Large (reader + LoRA delta) | Common Voice zh-TW/en (CC0), VoxPopuli (CC0), LibriSpeech, AMI, FLEURS, People's Speech clean (CC BY), ASCEND (CC BY-SA 4.0), Taiwan Parliament speech (CC BY-NC 4.0), NTUML2021 train (no licence stated) | Apache-2.0 (model card) | published (HF tc3oliver/TingMix-Large) |
-| LM-CN (character 5-gram) | CV + Parliament + ASCEND + NTUML-train transcripts (dev/test sentences removed) | shipped with the model | published |
+| TingMix-Small (trained from scratch, no base model) | same sources as TingMix-Large | Apache-2.0 (model card) | published (HF tc3oliver/TingMix-Small) |
+| LM-CN (character 5-gram) | CV + Parliament + ASCEND + NTUML-train transcripts (dev/test sentences removed) | shipped with both models | published |
 | LM-O (character 5-gram) | Common Voice zh-TW transcripts only (CC0) | CC0-derived; can ship with either model | built |
 
 Encoder: `google/embeddinggemma-2` is not redistributed. Users download it from Google and accept its terms and the

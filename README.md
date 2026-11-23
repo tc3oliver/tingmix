@@ -5,7 +5,7 @@ Real-time speech recognition for **Taiwanese Mandarin, English and intra-sentenc
 Status: both models are released on Hugging Face: [tc3oliver/TingMix-Large](https://huggingface.co/tc3oliver/TingMix-Large)
 (v3, GPU) and [tc3oliver/TingMix-Small](https://huggingface.co/tc3oliver/TingMix-Small) (CPU, native streaming). What works today:
 
-- `tingmix transcribe | listen | serve` with Embed2ASR-v1 or a TingMix-Large training export, optional character
+- `tingmix transcribe | listen | serve` with TingMix-Large, TingMix-Small, Embed2ASR-v1 or a TingMix-Large training export, optional character
   n-gram LM decoding (`--lm`), WebSocket streaming with bearer-token auth;
 - encoder LoRA fine-tuning of the EmbeddingGemma 2 audio tower jointly with the CTC reader, with a restartable,
   session-independent job manager ([docs/training.md](docs/training.md));
@@ -79,5 +79,6 @@ code-switching; the metrics are never averaged together.
 
 ## License
 
-Code: Apache-2.0. Model weights (when released) carry the terms of their base model and training data; see the model
-card of each release.
+Code: Apache-2.0. Model weights: Apache-2.0, as declared on the Hugging Face model card of each release. TingMix-Large
+needs `google/embeddinggemma-2`, which is not included and is used under Google's terms. Training data sources and
+attribution: [docs/licensing.md](docs/licensing.md).
